@@ -1,632 +1,567 @@
 /**
- * ExamTracker India — Government Site Scraper
- * Node.js | Cheerio + Playwright | Cloudflare R2 Storage
+ * ExamTracker India — Government Site Scraper (v2)
+ * Node.js | Cheerio + Playwright | Supabase Storage + DB
+ *
+ * Architecture (v2 — per README.md):
+ *   Hash store   → scraper_log.content_hash in Supabase DB (survives Railway restarts)
+ *   PDF storage  → Supabase Storage /raw-pdfs/{site_id}/{YYYY}/{MM}/{sha256}.pdf
+ *   Dedup        → pdf_hashes table (SHA-256 on raw PDF bytes)
+ *   Handoff      → POST /api/webhooks/new-pdf on the main app
+ *   Scheduling   → Railway cron jobs (not node-cron — Railway restarts kill processes)
  *
  * Flow:
- *   1. Load sites.json config
- *   2. For each site: fetch notification page
- *   3. Diff against last known hash (Redis/file)
- *   4. If changed: extract new PDF links
- *   5. Download PDFs → upload to Cloudflare R2
- *   6. Queue each PDF for Claude AI parsing
+ *   1. Load sites.json config, filter by PRIORITY_FILTER env var
+ *   2. For each site: fetch notification page HTML or RSS
+ *   3. Hash the notification section → compare against scraper_log.content_hash
+ *   4. If no change → write scraper_log(status=NO_CHANGE) → done
+ *   5. If changed → extract PDF links → download each PDF
+ *   6. SHA-256 hash of PDF bytes → check pdf_hashes table → skip if seen
+ *   7. Upload PDF to Supabase Storage at /raw-pdfs/{site_id}/{YYYY}/{MM}/{sha256}.pdf
+ *   8. Insert pdf_hashes row, pdf_ingestion_log row
+ *   9. POST webhook to main app → triggers PDF parsing pipeline
+ *  10. Write scraper_log(status=OK, new_pdfs_found=N, content_hash=new_hash)
  */
 
-import * as cheerio from "cheerio";
-import axios from "axios";
-import crypto from "crypto";
-import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
-import { chromium } from "playwright";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-} from "@aws-sdk/client-s3";
-import pLimit from "p-limit";
-import pino from "pino";
-import sitesConfig from "./sites.json" assert { type: "json" };
+import * as cheerio from 'cheerio'
+import axios from 'axios'
+import crypto from 'crypto'
+import { createClient } from '@supabase/supabase-js'
+import { chromium } from 'playwright'
+import pLimit from 'p-limit'
+import pino from 'pino'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const logger = pino({ level: process.env.LOG_LEVEL || "info" });
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  transport: process.env.NODE_ENV !== 'production'
+    ? { target: 'pino-pretty' }
+    : undefined,
+})
 
-// ─── CONFIG ────────────────────────────────────────────────────────────────
+// ─── Supabase Client ──────────────────────────────────────────────────────────
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+)
+
+// ─── Config ──────────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  // Cloudflare R2 (S3-compatible)
-  r2: {
-    endpoint: process.env.R2_ENDPOINT, // https://<accountid>.r2.cloudflarestorage.com
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-    bucket: process.env.R2_BUCKET || "examtracker-notifications",
-    region: "auto",
-  },
-
-  // Hash store — file-based for dev, replace with Redis in prod
-  hashStorePath: process.env.HASH_STORE_PATH || "./data/hashes.json",
-
-  // Scrape limits — be respectful to government servers
-  concurrency: parseInt(process.env.SCRAPE_CONCURRENCY || "3"),
-  requestDelayMs: parseInt(process.env.REQUEST_DELAY_MS || "2000"),
-  timeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || "30000"),
-
-  // User agent — identify ourselves honestly
-  userAgent:
-    "ExamTrackerBot/1.0 (+https://examtracker.in/bot) Academic aggregation service",
-
-  // Notification queue webhook — your backend API that triggers Claude parsing
+  concurrency: parseInt(process.env.SCRAPE_CONCURRENCY || '3'),
+  requestDelayMs: parseInt(process.env.REQUEST_DELAY_MS || '2000'),
+  timeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000'),
+  priorityFilter: (process.env.PRIORITY_FILTER || 'P0,P1').split(','),
+  siteIdFilter: process.env.SITE_ID || null,  // For local dev: run a single site
   parsingWebhookUrl: process.env.PARSING_WEBHOOK_URL,
-
-  // Filter — only process these priorities on this run (pass via env or args)
-  priorityFilter: (process.env.PRIORITY_FILTER || "P0,P1").split(","),
-};
-
-// ─── R2 CLIENT ─────────────────────────────────────────────────────────────
-
-const r2Client = new S3Client({
-  endpoint: CONFIG.r2.endpoint,
-  region: CONFIG.r2.region,
-  credentials: {
-    accessKeyId: CONFIG.r2.accessKeyId,
-    secretAccessKey: CONFIG.r2.secretAccessKey,
+  webhookSecret: process.env.SCRAPER_WEBHOOK_SECRET,
+  userAgent: 'ExamTrackerBot/1.0 (+https://examtracker.in/bot) Academic aggregation service',
+  storage: {
+    bucket: 'raw-pdfs',
   },
-});
+}
 
-// ─── HASH STORE ─────────────────────────────────────────────────────────────
-// In production: replace with Redis SET/GET calls (Upstash Redis recommended)
+// ─── Hash Store (Supabase DB) ────────────────────────────────────────────────
+// Replaces the JSON file hash store. Survives Railway restarts and deployments.
 
-class HashStore {
-  constructor(filePath) {
-    this.filePath = filePath;
-    this.store = {};
+async function getLastContentHash(siteId) {
+  const { data, error } = await supabase
+    .from('scraper_log')
+    .select('content_hash')
+    .eq('site_id', siteId)
+    .not('content_hash', 'is', null)
+    .order('scraped_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    logger.warn({ siteId, error: error.message }, 'Failed to fetch last hash')
+    return null
   }
+  return data?.content_hash ?? null
+}
 
-  async load() {
-    try {
-      const data = await fs.readFile(this.filePath, "utf8");
-      this.store = JSON.parse(data);
-    } catch {
-      this.store = {};
-    }
-  }
-
-  async save() {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    await fs.writeFile(this.filePath, JSON.stringify(this.store, null, 2));
-  }
-
-  get(siteId) {
-    return this.store[siteId] || null;
-  }
-
-  set(siteId, hash) {
-    this.store[siteId] = { hash, updatedAt: new Date().toISOString() };
-  }
-
-  hasChanged(siteId, newHash) {
-    const existing = this.get(siteId);
-    return !existing || existing.hash !== newHash;
+async function writeScraperLog(entry) {
+  const { error } = await supabase.from('scraper_log').insert(entry)
+  if (error) {
+    logger.error({ error: error.message }, 'Failed to write scraper_log')
   }
 }
 
-// ─── PAGE FETCHER ──────────────────────────────────────────────────────────
+// ─── PDF Deduplication ────────────────────────────────────────────────────────
+// SHA-256 on raw PDF bytes. Returns true if this PDF was already processed.
 
-class PageFetcher {
-  constructor() {
-    this.browser = null;
+async function isPdfAlreadySeen(sha256Hash) {
+  const { data, error } = await supabase
+    .from('pdf_hashes')
+    .select('id')
+    .eq('hash', sha256Hash)
+    .maybeSingle()
+
+  if (error) {
+    logger.warn({ error: error.message }, 'pdf_hashes lookup failed — treating as new')
+    return false  // Fail open: attempt processing
+  }
+  return !!data
+}
+
+async function recordPdfHash(entry) {
+  const { error } = await supabase.from('pdf_hashes').upsert(entry, {
+    onConflict: 'hash',
+    ignoreDuplicates: true,
+  })
+  if (error) {
+    logger.error({ error: error.message }, 'Failed to insert pdf_hashes row')
+  }
+}
+
+// ─── Supabase Storage Upload ──────────────────────────────────────────────────
+
+async function uploadPdfToStorage(pdfBuffer, siteId, sha256Hash) {
+  const now = new Date()
+  const yyyy = now.getFullYear()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const storagePath = `${siteId}/${yyyy}/${mm}/${sha256Hash}.pdf`
+
+  const { error } = await supabase.storage
+    .from(CONFIG.storage.bucket)
+    .upload(storagePath, pdfBuffer, {
+      contentType: 'application/pdf',
+      upsert: false,  // Never overwrite — sha256 path is deterministic
+    })
+
+  if (error) {
+    // 'Duplicate' error means file already exists — that's fine (content-addressed)
+    if (error.message?.includes('already exists')) {
+      logger.debug({ storagePath }, 'PDF already in storage (hash collision with db? skipping)')
+      return storagePath
+    }
+    throw new Error(`Storage upload failed: ${error.message}`)
   }
 
+  return storagePath  // Returns: {siteId}/{YYYY}/{MM}/{sha256}.pdf
+}
+
+async function recordIngestionLog(entry) {
+  const { data, error } = await supabase
+    .from('pdf_ingestion_log')
+    .insert(entry)
+    .select('id')
+    .single()
+
+  if (error) {
+    logger.error({ error: error.message }, 'Failed to insert pdf_ingestion_log')
+    return null
+  }
+  return data.id
+}
+
+// ─── Webhook → Main App ───────────────────────────────────────────────────────
+// Fires after each new PDF is stored. Main app picks it up and starts parsing.
+
+async function notifyMainApp(payload) {
+  if (!CONFIG.parsingWebhookUrl) {
+    // Dev mode: log to console (no main app running locally)
+    logger.info({ payload }, '[DEV] Would POST /api/webhooks/new-pdf')
+    return
+  }
+
+  try {
+    await axios.post(CONFIG.parsingWebhookUrl, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-scraper-secret': CONFIG.webhookSecret,
+      },
+      timeout: 10000,
+    })
+  } catch (err) {
+    // Non-fatal: PDF is stored. If webhook fails, recovery cron will requeue it.
+    logger.warn({ err: err.message, siteId: payload.site_id }, 'Webhook POST failed — PDF is stored, pipeline will recover')
+  }
+}
+
+// ─── Page Fetcher ─────────────────────────────────────────────────────────────
+
+class PageFetcher {
+  constructor() { this.browser = null }
+
   async init() {
-    // Launch browser for JS-heavy sites
-    this.browser = await chromium.launch({ headless: true });
+    this.browser = await chromium.launch({ headless: true })
   }
 
   async close() {
-    if (this.browser) await this.browser.close();
+    if (this.browser) await this.browser.close()
   }
 
-  /**
-   * Fetch a page using Cheerio (fast, for static HTML)
-   */
   async fetchStatic(url) {
     const response = await axios.get(url, {
-      headers: { "User-Agent": CONFIG.userAgent },
+      headers: { 'User-Agent': CONFIG.userAgent },
       timeout: CONFIG.timeoutMs,
       maxRedirects: 5,
-    });
-    return response.data;
+    })
+    return { html: response.data, httpStatus: response.status }
   }
 
-  /**
-   * Fetch a page using Playwright (for JS-rendered pages)
-   */
   async fetchDynamic(url) {
-    const page = await this.browser.newPage();
-    await page.setExtraHTTPHeaders({ "User-Agent": CONFIG.userAgent });
+    const page = await this.browser.newPage()
+    await page.setExtraHTTPHeaders({ 'User-Agent': CONFIG.userAgent })
     try {
-      await page.goto(url, {
-        waitUntil: "networkidle",
+      const response = await page.goto(url, {
+        waitUntil: 'networkidle',
         timeout: CONFIG.timeoutMs,
-      });
-      // Wait a bit for any lazy-loaded content
-      await page.waitForTimeout(2000);
-      return await page.content();
+      })
+      await page.waitForTimeout(2000)
+      return { html: await page.content(), httpStatus: response?.status() ?? 200 }
     } finally {
-      await page.close();
+      await page.close()
     }
   }
 
   async fetch(site) {
+    await sleep(CONFIG.requestDelayMs)
     try {
-      // Respect robots.txt delay
-      await sleep(CONFIG.requestDelayMs);
-
-      const html =
-        site.scrape_method === "js_render"
-          ? await this.fetchDynamic(site.notification_page)
-          : await this.fetchStatic(site.notification_page);
-
-      return html;
+      return site.scrape_method === 'js_render'
+        ? await this.fetchDynamic(site.notification_page)
+        : await this.fetchStatic(site.notification_page)
     } catch (err) {
-      logger.error({ siteId: site.id, url: site.notification_page, err: err.message }, "Fetch failed");
-      return null;
+      const httpStatus = err.response?.status ?? null
+      const status = httpStatus === 403 ? 'BLOCKED'
+        : httpStatus === 429 ? 'BLOCKED'
+          : err.code === 'ETIMEDOUT' ? 'TIMEOUT'
+            : 'ERROR'
+      logger.warn({ siteId: site.id, err: err.message, httpStatus }, `Fetch ${status}`)
+      return { html: null, httpStatus, errorStatus: status }
     }
   }
 }
 
-// ─── PDF EXTRACTOR ─────────────────────────────────────────────────────────
+// ─── HTML Processing ──────────────────────────────────────────────────────────
 
-/**
- * Extract PDF links from HTML content.
- * Government sites have inconsistent structures — we use multiple strategies.
- */
-function extractPdfLinks(html, baseUrl) {
-  const $ = cheerio.load(html);
-  const links = new Set();
+function hashNotificationSection(html, siteId) {
+  const $ = cheerio.load(html)
+  $('script, style, nav, header, footer, .ads, #ads, .advertisement, iframe').remove()
 
-  // Strategy 1: Direct .pdf href links
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href");
-    if (!href) return;
+  let content = ''
+  for (const sel of ['table', '.notification', '.notice', '.recruitment', '#notifications', 'ul li a', '.content a']) {
+    const found = $(sel).text().trim()
+    if (found.length > 100) { content = found; break }
+  }
+  if (!content) content = $('body').text().trim()
 
-    const lower = href.toLowerCase();
-    if (
-      lower.includes(".pdf") ||
-      lower.includes("/recruitment") ||
-      lower.includes("/notification") ||
-      lower.includes("/advertisement") ||
-      lower.includes("/vacancy") ||
-      lower.includes("advt") ||
-      lower.includes("notice")
-    ) {
-      try {
-        const absoluteUrl = new URL(href, baseUrl).toString();
-        links.add(absoluteUrl);
-      } catch {
-        // Invalid URL — skip
-      }
-    }
-  });
+  const normalized = content.replace(/\s+/g, ' ').trim()
+  return crypto.createHash('md5').update(normalized).digest('hex')
+}
 
-  // Strategy 2: onclick handlers that contain URLs
-  $("[onclick]").each((_, el) => {
-    const onclick = $(el).attr("onclick") || "";
-    const urlMatch = onclick.match(/['"]([^'"]*\.pdf[^'"]*)['"]/i);
+function extractNotificationSnippets(html, baseUrl) {
+  const $ = cheerio.load(html)
+  const snippets = []
+
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href') || ''
+    const lower = href.toLowerCase()
+
+    if (!lower.includes('.pdf') && !lower.includes('recruit') && !lower.includes('notif')
+      && !lower.includes('advt') && !lower.includes('vacancy')) return
+
+    let absoluteUrl
+    try { absoluteUrl = new URL(href, baseUrl).toString() } catch { return }
+
+    const linkText = $(el).text().trim()
+    const parentText = $(el).parent().text().trim()
+    const grandText = $(el).parent().parent().text().trim()
+
+    snippets.push({
+      url: absoluteUrl,
+      link_text: linkText,
+      context: (grandText || parentText).substring(0, 500),
+    })
+  })
+
+  // Strategy 2: onclick handlers with PDF URLs
+  $('[onclick]').each((_, el) => {
+    const onclick = $(el).attr('onclick') || ''
+    const urlMatch = onclick.match(/['"]([^'"]*\.pdf[^'"]*)['\"]/i)
     if (urlMatch) {
       try {
-        const absoluteUrl = new URL(urlMatch[1], baseUrl).toString();
-        links.add(absoluteUrl);
-      } catch {}
+        snippets.push({
+          url: new URL(urlMatch[1], baseUrl).toString(),
+          link_text: $(el).text().trim(),
+          context: '',
+        })
+      } catch { }
     }
-  });
+  })
 
-  // Strategy 3: meta refresh or embedded document links
-  $("iframe[src], embed[src], object[data]").each((_, el) => {
-    const src =
-      $(el).attr("src") || $(el).attr("data") || $(el).attr("href") || "";
-    if (src.toLowerCase().includes(".pdf")) {
-      try {
-        links.add(new URL(src, baseUrl).toString());
-      } catch {}
-    }
-  });
-
-  return Array.from(links);
+  // Deduplicate by URL
+  const seen = new Set()
+  return snippets.filter(s => { if (seen.has(s.url)) return false; seen.add(s.url); return true })
 }
 
-/**
- * Extract notification text snippets alongside PDF links.
- * Used to give Claude context about what the PDF is about.
- */
-function extractNotificationSnippets(html, baseUrl) {
-  const $ = cheerio.load(html);
-  const snippets = [];
-
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href") || "";
-    const lower = href.toLowerCase();
-
-    if (
-      lower.includes(".pdf") ||
-      lower.includes("/recruitment") ||
-      lower.includes("/notification")
-    ) {
-      let absoluteUrl;
-      try {
-        absoluteUrl = new URL(href, baseUrl).toString();
-      } catch {
-        return;
-      }
-
-      // Get surrounding text for context
-      const linkText = $(el).text().trim();
-      const parentText = $(el).parent().text().trim().substring(0, 200);
-      const grandparentText = $(el)
-        .parent()
-        .parent()
-        .text()
-        .trim()
-        .substring(0, 300);
-
-      snippets.push({
-        url: absoluteUrl,
-        link_text: linkText,
-        context: grandparentText || parentText,
-      });
-    }
-  });
-
-  return snippets;
-}
-
-// ─── HASH FUNCTIONS ────────────────────────────────────────────────────────
-
-/**
- * Hash only the notification-relevant section of a page.
- * Avoids false positives from ad banners, date changes, etc.
- */
-function hashNotificationSection(html, siteId) {
-  const $ = cheerio.load(html);
-
-  // Remove noise elements
-  $("script, style, nav, header, footer, .ads, #ads, .advertisement").remove();
-
-  // Try to focus on notification table/list
-  let content = "";
-  const selectors = [
-    "table", // Most gov sites use tables
-    ".notification",
-    ".notice",
-    ".recruitment",
-    "#notifications",
-    "#notice",
-    "#recruitment",
-    "ul li a", // List of links
-    ".content a", // Content area links
-  ];
-
-  for (const sel of selectors) {
-    const found = $(sel).text().trim();
-    if (found.length > 100) {
-      content = found;
-      break;
-    }
-  }
-
-  // Fallback to full body text if nothing specific found
-  if (!content) {
-    content = $("body").text().trim();
-  }
-
-  // Normalize whitespace for stable hashing
-  const normalized = content.replace(/\s+/g, " ").trim();
-  return crypto.createHash("md5").update(normalized).digest("hex");
-}
-
-// ─── R2 UPLOADER ───────────────────────────────────────────────────────────
+// ─── PDF Downloader ───────────────────────────────────────────────────────────
 
 async function downloadPdf(url) {
   try {
     const response = await axios.get(url, {
-      responseType: "arraybuffer",
-      headers: { "User-Agent": CONFIG.userAgent },
+      responseType: 'arraybuffer',
+      headers: { 'User-Agent': CONFIG.userAgent },
       timeout: CONFIG.timeoutMs,
-    });
-    return Buffer.from(response.data);
+    })
+    return Buffer.from(response.data)
   } catch (err) {
-    logger.error({ url, err: err.message }, "PDF download failed");
-    return null;
+    logger.warn({ url, err: err.message }, 'PDF download failed')
+    return null
   }
 }
 
-async function uploadToR2(pdfBuffer, key, metadata) {
-  const command = new PutObjectCommand({
-    Bucket: CONFIG.r2.bucket,
-    Key: key,
-    Body: pdfBuffer,
-    ContentType: "application/pdf",
-    Metadata: {
-      source_url: metadata.sourceUrl || "",
-      site_id: metadata.siteId || "",
-      scraped_at: new Date().toISOString(),
-      link_text: (metadata.linkText || "").substring(0, 255),
-    },
-  });
+// ─── RSS Fetcher ──────────────────────────────────────────────────────────────
 
-  await r2Client.send(command);
-  return `r2://${CONFIG.r2.bucket}/${key}`;
-}
-
-function buildR2Key(siteId, pdfUrl) {
-  // Key: site_id/YYYY/MM/DD/hash_of_url.pdf
-  const date = new Date();
-  const dateStr = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
-  const urlHash = crypto
-    .createHash("md5")
-    .update(pdfUrl)
-    .digest("hex")
-    .substring(0, 12);
-  return `${siteId}/${dateStr}/${urlHash}.pdf`;
-}
-
-// ─── NOTIFICATION QUEUE ────────────────────────────────────────────────────
-
-/**
- * Send a queued item to the parsing pipeline.
- * In production, this should write to a BullMQ queue or similar.
- * For now it sends a webhook POST.
- */
-async function queueForParsing(item) {
-  if (!CONFIG.parsingWebhookUrl) {
-    // In dev mode, just write to a local queue file
-    const queueFile = "./data/parse_queue.jsonl";
-    await fs.mkdir("./data", { recursive: true });
-    await fs.appendFile(
-      queueFile,
-      JSON.stringify({ ...item, queued_at: new Date().toISOString() }) + "\n"
-    );
-    logger.info({ item }, "Queued for parsing (local file)");
-    return;
-  }
-
-  try {
-    await axios.post(CONFIG.parsingWebhookUrl, item, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 10000,
-    });
-  } catch (err) {
-    logger.error({ err: err.message }, "Failed to queue for parsing");
-    // Don't throw — scraping succeeded, parsing queue is secondary
-  }
-}
-
-// ─── RSS FETCHER ──────────────────────────────────────────────────────────
-
-async function fetchRssLinks(rssUrl) {
+async function fetchRssItems(rssUrl) {
   try {
     const response = await axios.get(rssUrl, {
-      headers: {
-        "User-Agent": CONFIG.userAgent,
-        Accept: "application/rss+xml, application/xml, text/xml",
-      },
+      headers: { 'User-Agent': CONFIG.userAgent, 'Accept': 'application/rss+xml, application/xml, text/xml' },
       timeout: CONFIG.timeoutMs,
-    });
-
-    const $ = cheerio.load(response.data, { xmlMode: true });
-    const items = [];
-
-    $("item").each((_, el) => {
-      items.push({
-        title: $(el).find("title").text().trim(),
-        link: $(el).find("link").text().trim() || $(el).find("guid").text().trim(),
-        pubDate: $(el).find("pubDate").text().trim(),
-        description: $(el).find("description").text().trim().substring(0, 500),
-      });
-    });
-
-    return items;
+    })
+    const $ = cheerio.load(response.data, { xmlMode: true })
+    const items = []
+    $('item').each((_, el) => {
+      const link = $(el).find('link').text().trim() || $(el).find('guid').text().trim()
+      if (link) items.push({
+        url: link,
+        link_text: $(el).find('title').text().trim(),
+        context: $(el).find('description').text().trim().substring(0, 500),
+        pubDate: $(el).find('pubDate').text().trim(),
+      })
+    })
+    return items
   } catch (err) {
-    logger.error({ rssUrl, err: err.message }, "RSS fetch failed");
-    return [];
+    logger.warn({ rssUrl, err: err.message }, 'RSS fetch failed')
+    return []
   }
 }
 
-// ─── SITE PROCESSOR ───────────────────────────────────────────────────────
+// ─── Core PDF Processor ───────────────────────────────────────────────────────
+// Download → SHA-256 → dedup check → Supabase Storage → log → webhook
 
-async function processSite(site, fetcher, hashStore) {
-  logger.info({ siteId: site.id, url: site.notification_page }, "Processing site");
+async function processPdf(snippet, site) {
+  const pdfBuffer = await downloadPdf(snippet.url)
+  if (!pdfBuffer) return null
 
-  // Handle RSS feeds separately
+  // SHA-256 on raw bytes — content-addressed, not URL-addressed
+  const sha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex')
+
+  // Deduplication check
+  const alreadySeen = await isPdfAlreadySeen(sha256)
+  if (alreadySeen) {
+    logger.debug({ siteId: site.id, sha256: sha256.substring(0, 12) }, 'PDF already processed — skip')
+    return null
+  }
+
+  // Upload to Supabase Storage
+  let storagePath
+  try {
+    storagePath = await uploadPdfToStorage(pdfBuffer, site.id, sha256)
+  } catch (err) {
+    logger.error({ siteId: site.id, url: snippet.url, err: err.message }, 'Storage upload failed')
+    return null
+  }
+
+  // Record in pdf_hashes (dedup table)
+  await recordPdfHash({
+    hash: sha256,
+    source_url: snippet.url,
+    site_id: site.id,
+    storage_path: storagePath,
+  })
+
+  // Record in pdf_ingestion_log (pipeline tracking)
+  const ingestionLogId = await recordIngestionLog({
+    site_id: site.id,
+    source_url: snippet.url,
+    pdf_hash: sha256,
+    storage_path: storagePath,
+    link_text: snippet.link_text?.substring(0, 500) ?? null,
+    context_text: snippet.context?.substring(0, 1000) ?? null,
+    status: 'QUEUED',
+  })
+
+  // Fire webhook → main app starts the parsing pipeline
+  await notifyMainApp({
+    site_id: site.id,
+    site_name: site.name,
+    category: site.category,
+    state: site.state ?? null,
+    source_url: snippet.url,
+    storage_path: storagePath,
+    link_text: snippet.link_text ?? null,
+    context_text: snippet.context ?? null,
+    pdf_hash: sha256,
+    ingestion_log_id: ingestionLogId,
+    scraped_at: new Date().toISOString(),
+  })
+
+  logger.info({ siteId: site.id, sha256: sha256.substring(0, 12), storagePath }, '✅ New PDF queued')
+  return sha256
+}
+
+// ─── Site Processor ───────────────────────────────────────────────────────────
+
+async function processSite(site, fetcher) {
+  const startMs = Date.now()
+  logger.info({ siteId: site.id, url: site.notification_page }, `→ Scraping ${site.name}`)
+
+  // Handle RSS feeds
   if (site.has_rss && site.rss_url) {
-    return await processRssSite(site, hashStore);
+    return await processRssSite(site, startMs)
   }
 
   // Fetch HTML
-  const html = await fetcher.fetch(site);
-  if (!html) return { siteId: site.id, status: "fetch_failed" };
+  const { html, httpStatus, errorStatus } = await fetcher.fetch(site)
 
-  // Hash check
-  const newHash = hashNotificationSection(html, site.id);
-  if (!hashStore.hasChanged(site.id, newHash)) {
-    logger.debug({ siteId: site.id }, "No changes detected");
-    return { siteId: site.id, status: "no_change" };
+  if (!html) {
+    await writeScraperLog({
+      site_id: site.id,
+      status: errorStatus || 'ERROR',
+      http_status: httpStatus,
+      duration_ms: Date.now() - startMs,
+      new_pdfs_found: 0,
+    })
+    return { siteId: site.id, status: errorStatus || 'ERROR' }
   }
 
-  logger.info({ siteId: site.id }, "Changes detected! Extracting PDFs...");
+  // Hash the notification section
+  const newHash = hashNotificationSection(html, site.id)
+  const lastHash = await getLastContentHash(site.id)
 
-  // Extract PDF links with context
-  const snippets = extractNotificationSnippets(html, site.notification_page);
-  const newPdfs = [];
+  if (lastHash && lastHash === newHash) {
+    await writeScraperLog({
+      site_id: site.id,
+      status: 'NO_CHANGE',
+      content_hash: newHash,
+      http_status: httpStatus,
+      duration_ms: Date.now() - startMs,
+      new_pdfs_found: 0,
+    })
+    logger.debug({ siteId: site.id }, 'No change')
+    return { siteId: site.id, status: 'NO_CHANGE' }
+  }
+
+  logger.info({ siteId: site.id }, '🔔 Change detected!')
+
+  // Extract PDF links with surrounding context
+  const snippets = extractNotificationSnippets(html, site.notification_page)
+  const processed = []
 
   for (const snippet of snippets) {
-    // Skip if it's not a PDF and not a recruitment link
-    const url = snippet.url.toLowerCase();
-    if (!url.includes(".pdf") && !url.includes("recruit") && !url.includes("notif")) {
-      continue;
-    }
-
-    // Download PDF
-    let r2Url = null;
-    if (url.includes(".pdf")) {
-      const pdfBuffer = await downloadPdf(snippet.url);
-      if (pdfBuffer) {
-        const r2Key = buildR2Key(site.id, snippet.url);
-        try {
-          r2Url = await uploadToR2(pdfBuffer, r2Key, {
-            sourceUrl: snippet.url,
-            siteId: site.id,
-            linkText: snippet.link_text,
-          });
-        } catch (err) {
-          logger.error({ err: err.message, url: snippet.url }, "R2 upload failed");
-        }
-      }
-    }
-
-    const queueItem = {
-      site_id: site.id,
-      site_name: site.name,
-      category: site.category,
-      state: site.state || null,
-      source_url: snippet.url,
-      r2_url: r2Url,
-      link_text: snippet.link_text,
-      context_text: snippet.context,
-      scraped_at: new Date().toISOString(),
-    };
-
-    await queueForParsing(queueItem);
-    newPdfs.push(queueItem);
+    if (!snippet.url.toLowerCase().includes('.pdf')) continue
+    const result = await processPdf(snippet, site)
+    if (result) processed.push(result)
   }
 
-  // Update hash only after successful processing
-  hashStore.set(site.id, newHash);
+  // Update hash store with new hash (only after successful processing)
+  await writeScraperLog({
+    site_id: site.id,
+    status: 'OK',
+    content_hash: newHash,
+    http_status: httpStatus,
+    duration_ms: Date.now() - startMs,
+    new_pdfs_found: processed.length,
+  })
 
-  return {
-    siteId: site.id,
-    status: "processed",
-    newItems: newPdfs.length,
-  };
+  return { siteId: site.id, status: 'OK', newPdfs: processed.length }
 }
 
-async function processRssSite(site, hashStore) {
-  const items = await fetchRssLinks(site.rss_url);
-  if (!items.length) return { siteId: site.id, status: "rss_empty" };
+async function processRssSite(site, startMs) {
+  const items = await fetchRssItems(site.rss_url)
 
-  // Hash the RSS items list
-  const contentHash = crypto
-    .createHash("md5")
-    .update(items.map((i) => i.link).join("|"))
-    .digest("hex");
+  // Hash the list of item URLs (structure change detection)
+  const rssHash = crypto.createHash('md5')
+    .update(items.map(i => i.url).join('|'))
+    .digest('hex')
 
-  if (!hashStore.hasChanged(site.id + "_rss", contentHash)) {
-    return { siteId: site.id, status: "no_change" };
+  const lastHash = await getLastContentHash(`${site.id}_rss`)
+  if (lastHash && lastHash === rssHash) {
+    await writeScraperLog({
+      site_id: site.id,
+      status: 'NO_CHANGE',
+      content_hash: rssHash,
+      duration_ms: Date.now() - startMs,
+      new_pdfs_found: 0,
+    })
+    return { siteId: site.id, status: 'NO_CHANGE' }
   }
 
-  logger.info({ siteId: site.id, count: items.length }, "New RSS items found");
+  logger.info({ siteId: site.id, count: items.length }, '🔔 RSS: New items')
 
+  const processed = []
   for (const item of items) {
-    if (!item.link) continue;
-
-    let r2Url = null;
-    if (item.link.toLowerCase().includes(".pdf")) {
-      const pdfBuffer = await downloadPdf(item.link);
-      if (pdfBuffer) {
-        const r2Key = buildR2Key(site.id, item.link);
-        try {
-          r2Url = await uploadToR2(pdfBuffer, r2Key, {
-            sourceUrl: item.link,
-            siteId: site.id,
-            linkText: item.title,
-          });
-        } catch {}
-      }
-    }
-
-    await queueForParsing({
-      site_id: site.id,
-      site_name: site.name,
-      category: site.category,
-      state: site.state || null,
-      source_url: item.link,
-      r2_url: r2Url,
-      link_text: item.title,
-      context_text: item.description,
-      pub_date: item.pubDate,
-      scraped_at: new Date().toISOString(),
-    });
+    if (!item.url.toLowerCase().includes('.pdf')) continue
+    const result = await processPdf(item, site)
+    if (result) processed.push(result)
   }
 
-  hashStore.set(site.id + "_rss", contentHash);
-  return { siteId: site.id, status: "processed", newItems: items.length };
+  await writeScraperLog({
+    site_id: site.id,
+    status: 'OK',
+    content_hash: rssHash,
+    duration_ms: Date.now() - startMs,
+    new_pdfs_found: processed.length,
+  })
+
+  return { siteId: site.id, status: 'OK', newPdfs: processed.length }
 }
 
-// ─── MAIN ORCHESTRATOR ─────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  logger.info("ExamTracker Scraper starting...");
+  logger.info({ priorities: CONFIG.priorityFilter }, 'ExamTracker Scraper starting')
 
-  // Flatten all sites from all categories
-  const allSites = [];
-  for (const category of Object.values(sitesConfig.sites)) {
-    for (const site of category) {
-      // Skip manual-only sites
-      if (site.scrape_method === "manual") continue;
-      // Skip sites without notification pages
-      if (!site.notification_page) continue;
-      // Apply priority filter
-      if (!CONFIG.priorityFilter.includes(site.priority)) continue;
+  // Load sites.json
+  const { default: sitesConfig } = await import('./sites.json', { assert: { type: 'json' } })
 
-      allSites.push(site);
+  const allSites = []
+  for (const sites of Object.values(sitesConfig.sites)) {
+    for (const site of sites) {
+      if (site.scrape_method === 'manual') continue
+      if (!site.notification_page && !site.rss_url) continue
+      if (!CONFIG.priorityFilter.includes(site.priority)) continue
+      if (CONFIG.siteIdFilter && site.id !== CONFIG.siteIdFilter) continue
+      allSites.push(site)
     }
   }
 
-  logger.info(
-    { total: allSites.length, priorities: CONFIG.priorityFilter },
-    "Sites loaded"
-  );
+  logger.info({ total: allSites.length }, 'Sites loaded')
 
-  // Load hash store
-  const hashStore = new HashStore(CONFIG.hashStorePath);
-  await hashStore.load();
+  const fetcher = new PageFetcher()
+  await fetcher.init()
 
-  // Init browser for JS-rendered pages
-  const fetcher = new PageFetcher();
-  await fetcher.init();
-
-  // Process sites with concurrency limit
-  const limit = pLimit(CONFIG.concurrency);
+  const limit = pLimit(CONFIG.concurrency)
   const results = await Promise.all(
-    allSites.map((site) =>
-      limit(() => processSite(site, fetcher, hashStore))
-    )
-  );
+    allSites.map(site => limit(() => processSite(site, fetcher)))
+  )
 
-  await fetcher.close();
-  await hashStore.save();
+  await fetcher.close()
 
-  // Summary
   const summary = {
     total: results.length,
-    processed: results.filter((r) => r.status === "processed").length,
-    noChange: results.filter((r) => r.status === "no_change").length,
-    failed: results.filter((r) => r.status === "fetch_failed").length,
-    newItems: results.reduce((sum, r) => sum + (r.newItems || 0), 0),
-  };
+    ok: results.filter(r => r.status === 'OK').length,
+    noChange: results.filter(r => r.status === 'NO_CHANGE').length,
+    failed: results.filter(r => ['ERROR', 'BLOCKED', 'TIMEOUT'].includes(r.status)).length,
+    newPdfs: results.reduce((sum, r) => sum + (r.newPdfs || 0), 0),
+  }
 
-  logger.info(summary, "Scraper run complete");
-  return summary;
+  logger.info(summary, 'Scraper run complete')
+
+  // Exit with error code if any P0 site failed (Railway can alert on non-zero exit)
+  const p0Sites = allSites.filter(s => s.priority === 'P0').map(s => s.id)
+  const p0Failed = results.filter(r => p0Sites.includes(r.siteId) && r.status === 'ERROR').length
+  if (p0Failed > 0) {
+    logger.error({ p0Failed }, `${p0Failed} P0 site(s) failed — check scraper_log`)
+    process.exit(1)
+  }
 }
 
-// ─── UTILS ────────────────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ─── ENTRY POINT ──────────────────────────────────────────────────────────
-
-main().catch((err) => {
-  logger.error({ err: err.message, stack: err.stack }, "Scraper crashed");
-  process.exit(1);
-});
+main().catch(err => {
+  logger.error({ err: err.message, stack: err.stack }, 'Scraper crashed')
+  process.exit(1)
+})

@@ -1,123 +1,55 @@
 /**
- * ExamTracker Scraper — Cron Schedule Configuration
+ * ExamTracker — Railway Cron Setup
  *
- * Deploy this with node-cron or as separate cron jobs on your server.
- * Or use Railway.app / Render.com cron jobs with the npm scripts.
+ * The scraper does NOT use node-cron. It runs as 4 separate Railway cron services.
+ * Each service starts, runs, and exits. Railway starts it again on schedule.
  *
- * RECOMMENDED: Run as 4 separate cron jobs with different priority filters
+ * WHY NOT node-cron:
+ *   Railway restarts services on deploy. A long-lived process with node-cron
+ *   loses its schedule on every restart. Railway native cron jobs fire on schedule
+ *   regardless of restarts or deployments.
+ *
+ * SETUP IN RAILWAY DASHBOARD:
+ *   Create 4 separate Railway services — all connected to the same scraper repo (REFER/).
+ *   Set different env vars and cron schedules per service.
+ *
+ * ─── Service 1: examtracker-scraper-p0 ───────────────────────────────────────
+ *   Source:        This repo (REFER/ folder)
+ *   Start Command: node index.js
+ *   Schedule:      0 *\/2 * * *     (every 2 hours)
+ *   PRIORITY_FILTER=P0
+ *
+ * ─── Service 2: examtracker-scraper-p1 ───────────────────────────────────────
+ *   Start Command: node index.js
+ *   Schedule:      0 0,6,12,18 * * *   (every 6 hours)
+ *   PRIORITY_FILTER=P1
+ *
+ * ─── Service 3: examtracker-scraper-p2 ───────────────────────────────────────
+ *   Start Command: node index.js
+ *   Schedule:      0 1,13 * * *   (every 12 hours)
+ *   PRIORITY_FILTER=P2
+ *
+ * ─── Service 4: examtracker-scraper-p3 ───────────────────────────────────────
+ *   Start Command: node index.js
+ *   Schedule:      0 6 * * *   (daily at 6 AM IST)
+ *   PRIORITY_FILTER=P3
+ *
+ * SHARED ENV VARS (set on all 4 services via Railway shared variables):
+ *   SUPABASE_URL=
+ *   SUPABASE_SERVICE_ROLE_KEY=
+ *   PARSING_WEBHOOK_URL=https://your-app.railway.app/api/webhooks/new-pdf
+ *   SCRAPER_WEBHOOK_SECRET=   (same as INTERNAL_API_SECRET in the main app)
+ *   SCRAPE_CONCURRENCY=3
+ *   REQUEST_DELAY_MS=2000
+ *   REQUEST_TIMEOUT_MS=30000
+ *   LOG_LEVEL=info
+ *
+ * EACH SERVICE SETS ITS OWN:
+ *   PRIORITY_FILTER=P0   (or P1, P2, P3)
+ *
+ * That is it. No node-cron. No long-lived process. No missed runs on restart.
  */
 
-import cron from "node-cron";
-import { exec } from "child_process";
-import pino from "pino";
-
-const logger = pino({ level: "info" });
-
-/**
- * CRON SCHEDULE BREAKDOWN:
- *
- * P0 sites (SSC, UPSC, IBPS, SBI, RBI, all 21 RRBs):
- *   → Every 2 hours: 0 0,2,4,6,8,10,12,14,16,18,20,22 * * *
- *
- * P1 sites (State PSCs, Defence, Banking additional, Teaching, PSUs):
- *   → Every 6 hours: 0 0,6,12,18 * * *
- *
- * P2 sites (Secondary PSUs, Underrated gems, High Courts):
- *   → Every 12 hours: 0 0,12 * * *
- *
- * P3 sites (Very niche, rarely updated):
- *   → Once daily: 0 6 * * *
- */
-
-// ─── P0: Every 2 hours ───────────────────────────────────────────────────────
-cron.schedule(
-  "0 */2 * * *",
-  () => {
-    logger.info("Running P0 scrape (every 2 hrs)...");
-    exec(
-      "PRIORITY_FILTER=P0 node index.js",
-      { cwd: process.cwd() },
-      (err, stdout, stderr) => {
-        if (err) logger.error({ err: err.message }, "P0 scrape failed");
-        else logger.info("P0 scrape complete");
-      }
-    );
-  },
-  { timezone: "Asia/Kolkata" }
-);
-
-// ─── P1: Every 6 hours ───────────────────────────────────────────────────────
-cron.schedule(
-  "0 0,6,12,18 * * *",
-  () => {
-    logger.info("Running P1 scrape (every 6 hrs)...");
-    exec(
-      "PRIORITY_FILTER=P1 node index.js",
-      { cwd: process.cwd() },
-      (err) => {
-        if (err) logger.error({ err: err.message }, "P1 scrape failed");
-        else logger.info("P1 scrape complete");
-      }
-    );
-  },
-  { timezone: "Asia/Kolkata" }
-);
-
-// ─── P2: Every 12 hours ──────────────────────────────────────────────────────
-cron.schedule(
-  "0 1,13 * * *",
-  () => {
-    logger.info("Running P2 scrape (every 12 hrs)...");
-    exec(
-      "PRIORITY_FILTER=P2 node index.js",
-      { cwd: process.cwd() },
-      (err) => {
-        if (err) logger.error({ err: err.message }, "P2 scrape failed");
-        else logger.info("P2 scrape complete");
-      }
-    );
-  },
-  { timezone: "Asia/Kolkata" }
-);
-
-// ─── P3: Once daily at 6am IST ───────────────────────────────────────────────
-cron.schedule(
-  "0 6 * * *",
-  () => {
-    logger.info("Running P3 scrape (daily)...");
-    exec(
-      "PRIORITY_FILTER=P3 node index.js",
-      { cwd: process.cwd() },
-      (err) => {
-        if (err) logger.error({ err: err.message }, "P3 scrape failed");
-        else logger.info("P3 scrape complete");
-      }
-    );
-  },
-  { timezone: "Asia/Kolkata" }
-);
-
-logger.info("ExamTracker Cron Scheduler started. All 4 tiers active.");
-logger.info("P0: every 2hrs | P1: every 6hrs | P2: every 12hrs | P3: daily 6am IST");
-
-/**
- * ALTERNATIVE: Use Railway.app Cron Jobs
- *
- * In your railway.toml or Railway dashboard, create 4 services:
- *
- *   Service 1 — examtracker-scraper-p0
- *     Command: npm run scrape:p0
- *     Cron: 0 *\/2 * * *
- *
- *   Service 2 — examtracker-scraper-p1
- *     Command: PRIORITY_FILTER=P1 node index.js
- *     Cron: 0 0,6,12,18 * * *
- *
- *   Service 3 — examtracker-scraper-p2
- *     Command: PRIORITY_FILTER=P2 node index.js
- *     Cron: 0 1,13 * * *
- *
- *   Service 4 — examtracker-scraper-p3
- *     Command: PRIORITY_FILTER=P3 node index.js
- *     Cron: 0 6 * * *
- */
+// This file is documentation only.
+// The actual scraper entry point is index.js
+// Run locally with: PRIORITY_FILTER=P0 node index.js

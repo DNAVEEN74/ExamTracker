@@ -1,0 +1,29 @@
+{
+    "name": "examtracker-scraper",
+    "version": "1.0.0",
+    "description": "ExamTracker India — Government site scraper. Monitors 142 official recruitment websites, detects new notifications, and queues PDFs for parsing.",
+    "type": "module",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "LOG_LEVEL=debug PRIORITY_FILTER=P0 node index.js",
+        "scrape:p0": "PRIORITY_FILTER=P0 node index.js",
+        "scrape:p1": "PRIORITY_FILTER=P1 node index.js",
+        "scrape:p2": "PRIORITY_FILTER=P2 node index.js",
+        "scrape:p3": "PRIORITY_FILTER=P3 node index.js",
+        "scrape:all": "PRIORITY_FILTER=P0,P1,P2,P3 node index.js"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.0",
+        "axios": "^1.6.0",
+        "cheerio": "^1.0.0",
+        "dotenv": "^16.0.0",
+        "p-limit": "^5.0.0",
+        "pino": "^8.17.0",
+        "pino-pretty": "^10.0.0",
+        "playwright": "^1.40.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}

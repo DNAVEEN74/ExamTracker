@@ -1,0 +1,35 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm install && npx playwright install chromium --with-deps"
+
+[deploy]
+restartPolicyType = "always"
+
+# ── Railway Cron Service Setup ────────────────────────────────────────────────
+# Create 4 separate Railway cron services all pointing to this repo.
+# Set PRIORITY_FILTER as an env var on each service.
+#
+# Service 1 — examtracker-scraper-p0
+#   Start:    node index.js
+#   Cron:     0 */2 * * *          (every 2 hours)
+#   Env:      PRIORITY_FILTER=P0
+#
+# Service 2 — examtracker-scraper-p1
+#   Start:    node index.js
+#   Cron:     0 0,6,12,18 * * *    (every 6 hours)
+#   Env:      PRIORITY_FILTER=P1
+#
+# Service 3 — examtracker-scraper-p2
+#   Start:    node index.js
+#   Cron:     0 1,13 * * *         (every 12 hours)
+#   Env:      PRIORITY_FILTER=P2
+#
+# Service 4 — examtracker-scraper-p3
+#   Start:    node index.js
+#   Cron:     0 6 * * *            (daily at 6 AM IST)
+#   Env:      PRIORITY_FILTER=P3
+#
+# Shared env vars (set via Railway shared variables on all 4 services):
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+#   PARSING_WEBHOOK_URL, SCRAPER_WEBHOOK_SECRET,
+#   SCRAPE_CONCURRENCY, REQUEST_DELAY_MS, LOG_LEVEL

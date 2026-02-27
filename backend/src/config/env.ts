@@ -26,6 +26,8 @@ const envSchema = z.object({
     MSG91_SENDER_ID: z.string().default('EXMTRK'),
     // Internal
     INTERNAL_API_SECRET: z.string().optional(),
+    // Supabase DB Webhook secret (for process-notifications route)
+    SUPABASE_WEBHOOK_SECRET: z.string().optional(),
     FRONTEND_URL: z.string().default('http://localhost:3000'),
 })
 

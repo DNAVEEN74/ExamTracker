@@ -1,0 +1,499 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* ─── ExamTracker India — Design System ─────────────────────────────────────
+   Philosophy: Scannable in 3 seconds. Clarity over cleverness.
+   Inspiration: Dark-mode minimalism with generous whitespace.
+   Ref: ExamTracker_Design_System_PART1_README.md
+   Font: Inter (all weights) — excellent on budget Android screens
+   Accent: #FF6B35 (orange) — used sparingly for CTAs and deadlines only
+─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Backgrounds ── */
+  --background: #18181b;
+  /* Warm dark — not pure black */
+  --background-secondary: #232326;
+  --background-card: #2c2c30;
+  --background-elevated: #38383d;
+
+  /* ── Text ── */
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+
+  /* ── Accent: ExamTracker Orange ── */
+  --accent: #ff6b35;
+  --accent-light: rgba(255, 107, 53, 0.10);
+  --accent-dark: #e65a2e;
+
+  /* ── Status ── */
+  --success: #10b981;
+  --success-light: rgba(16, 185, 129, 0.10);
+  --warning: #f59e0b;
+  --warning-light: rgba(245, 158, 11, 0.10);
+  --error: #ef4444;
+  --error-light: rgba(239, 68, 68, 0.10);
+  --info: #60a5fa;
+  --info-light: rgba(96, 165, 250, 0.10);
+
+  /* ── Borders ── */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* ── Shadow ── */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+
+  /* ── Radius (from design system specs) ── */
+  --radius-sm: 8px;
+  /* buttons, inputs */
+  --radius: 12px;
+  /* cards */
+  --radius-lg: 16px;
+  /* modals, sheets */
+
+  /* ── Font ── */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ─── Typography Scale (Design System §3.2) ─────────────────────────────── */
+.text-hero {
+  font-size: clamp(28px, 8vw, 36px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.text-3xl {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.text-2xl {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.text-xl {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.text-lg {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/* Exam card titles */
+.text-base {
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* Default */
+.text-sm {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* Metadata */
+.text-xs {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+/* Captions */
+
+/* ─── Buttons (min 44px height — WCAG 2.5.5 AA, radius 8px per spec) ────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: var(--radius-sm);
+  /* 8px — ExamTracker spec, not pill */
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  border: none;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Primary: Orange button — "Track This Exam", "Get Started" */
+.btn-primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-dark);
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.28);
+  text-decoration: none;
+}
+
+/* Secondary: Outlined — "View Details", "Go Back" */
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+
+.btn-secondary:hover {
+  background: var(--background-card);
+  text-decoration: none;
+}
+
+/* Ghost: Text only — "Skip", "Maybe later" */
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0 12px;
+}
+
+.btn-ghost:hover {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+/* Disabled */
+.btn:disabled {
+  background: var(--background-elevated);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  cursor: not-allowed;
+}
+
+/* Full width helper */
+.btn-full {
+  width: 100%;
+}
+
+/* ─── Navigation ─────────────────────────────────────────────────────────── */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 64px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(24, 24, 27, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.nav-logo:hover {
+  text-decoration: none;
+}
+
+/* ─── Exam Card (most-seen component) ───────────────────────────────────── */
+/* Spec: ExamTracker_Design_System_PART2_README.md §4.1 */
+.exam-card {
+  background: var(--background-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.exam-card:hover {
+  border: 2px solid var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.exam-card.new-unread {
+  border-left: 4px solid var(--accent);
+}
+
+/* .exam-card.urgent-deadline — handled by .deadline-critical badge animation on the card */
+
+.exam-card.disabled {
+  opacity: 0.5;
+}
+
+.exam-card.disabled .exam-card-name {
+  text-decoration: line-through;
+}
+
+/* ─── Deadline Badge ─────────────────────────────────────────────────────── */
+.deadline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.deadline-normal {
+  color: var(--text-tertiary);
+}
+
+.deadline-warning {
+  color: var(--warning);
+  background: var(--warning-light);
+}
+
+.deadline-critical {
+  color: var(--error);
+  background: var(--error-light);
+  animation: blink 0.8s infinite;
+}
+
+.deadline-expired {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ─── Eligibility Badges ─────────────────────────────────────────────────── */
+.badge-eligible {
+  color: var(--success);
+}
+
+.badge-likely {
+  color: var(--warning);
+}
+
+.badge-check-required {
+  color: #fb923c;
+}
+
+.badge-ineligible {
+  color: var(--text-tertiary);
+}
+
+/* ─── Input Fields (height: 56px per onboarding spec) ───────────────────── */
+.input {
+  width: 100%;
+  height: 56px;
+  padding: 0 16px;
+  background: var(--background-secondary);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-size: 16px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.input.error {
+  border-color: var(--error);
+}
+
+/* ─── OTP Boxes (56×56px per spec) ──────────────────────────────────────── */
+.otp-input {
+  width: 56px;
+  height: 56px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 600;
+  background: var(--background-secondary);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.otp-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.otp-input.filled {
+  border-color: var(--accent);
+}
+
+.otp-input.error {
+  border-color: var(--error);
+}
+
+/* ─── Mode Cards (Onboarding Screen 2 — min 140px, padding 24px per spec) ── */
+.mode-card {
+  background: var(--background-card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  min-height: 140px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  margin-bottom: 12px;
+}
+
+.mode-card:hover,
+.mode-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* ─── Progress Bar (onboarding) ─────────────────────────────────────────── */
+.progress-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* ─── Instant Feedback Card (DOB wow moment) ─────────────────────────────── */
+.wow-card {
+  background: var(--success-light);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 16px;
+  color: var(--success);
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeUp 0.3s ease;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ─── Utility ────────────────────────────────────────────────────────────── */
+.container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.container-md {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.container-lg {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 24px 0;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}

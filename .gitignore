@@ -1,0 +1,43 @@
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+
+# ─── Environment Variables (NEVER commit) ─────────────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ─── Next.js (frontend) ───────────────────────────────────────────────────────
+.next/
+out/
+frontend/.next/
+frontend/out/
+
+# ─── TypeScript Build (backend) ───────────────────────────────────────────────
+dist/
+backend/dist/
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+build/
+coverage/
+.DS_Store
+*.log
+*.log.*
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Scraper ──────────────────────────────────────────────────────────────────
+scraper/data/
+scraper/screenshots/
+
+# ─── Temp ─────────────────────────────────────────────────────────────────────
+tmp/
+temp/

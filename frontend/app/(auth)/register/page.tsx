@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import OnboardingLayout from '@/components/onboarding/OnboardingLayout'
-import StepPhone from '@/components/onboarding/StepPhone'
+import StepEmail from '@/components/onboarding/StepEmail'
 import StepName from '@/components/onboarding/StepName'
 import StepMode from '@/components/onboarding/StepMode'
 import StepDOB from '@/components/onboarding/StepDOB'
@@ -28,7 +28,7 @@ type ExamCat =
 
 interface FormData {
     // Step 0
-    phone: string
+    email: string
     // Step 1
     display_name: string
     // Step 2
@@ -57,7 +57,7 @@ interface FormData {
 const STORAGE_KEY = 'examtracker_onboarding'
 
 const INITIAL: FormData = {
-    phone: '', display_name: '', mode: null, date_of_birth: '',
+    email: '', display_name: '', mode: null, date_of_birth: '',
     category: null, highest_qualification: null, qualification_stream: '',
     marks_percentage: null, is_final_year: false,
     domicile_state: null, exam_states: [], exam_categories: [],
@@ -80,7 +80,7 @@ function save(step: number, data: FormData) {
 }
 
 // ── Component ──────────────────────────────────────────────────────────
-export default function RegisterPage() {
+function RegisterForm() {
     const router = useRouter()
     const searchParams = useSearchParams()
 
@@ -138,11 +138,11 @@ export default function RegisterPage() {
         )
     }
 
-    // ── Step 0: Phone / Google ─────────────────────────────────────────
+    // ── Step 0: Email / Google ─────────────────────────────────────────
     if (step === 0) {
         return (
             <OnboardingLayout step={0}>
-                <StepPhone onComplete={phone => { update({ phone }); goNext({ phone }) }} />
+                <StepEmail onComplete={email => { update({ email }); goNext({ email }) }} />
             </OnboardingLayout>
         )
     }
@@ -269,5 +269,14 @@ export default function RegisterPage() {
                 onSave={handleComplete}
             />
         </OnboardingLayout>
+    )
+}
+
+// ── Component ──────────────────────────────────────────────────────────
+export default function RegisterPage() {
+    return (
+        <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--background)' }} />}>
+            <RegisterForm />
+        </Suspense>
     )
 }

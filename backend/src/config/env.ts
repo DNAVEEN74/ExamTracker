@@ -12,18 +12,10 @@ const envSchema = z.object({
     // Upstash Redis
     UPSTASH_REDIS_REST_URL: z.string().optional(),
     UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
-    // Razorpay
-    RAZORPAY_KEY_ID: z.string().optional(),
-    RAZORPAY_KEY_SECRET: z.string().optional(),
-    RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
     // Resend
-    RESEND_API_KEY: z.string().optional(),
+    RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY is required'),
     RESEND_FROM_ALERTS: z.string().default('ExamTracker <alerts@examtracker.in>'),
     RESEND_FROM_AUTH: z.string().default('ExamTracker <noreply@examtracker.in>'),
-    // MSG91
-    MSG91_API_KEY: z.string().optional(),
-    MSG91_TEMPLATE_ID: z.string().optional(),
-    MSG91_SENDER_ID: z.string().default('EXMTRK'),
     // Internal
     INTERNAL_API_SECRET: z.string().optional(),
     // Supabase DB Webhook secret (for process-notifications route)

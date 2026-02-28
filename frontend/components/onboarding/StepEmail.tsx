@@ -2,13 +2,13 @@
 
 import { useState, useRef, useEffect } from 'react'
 
-interface StepPhoneProps {
-    onComplete: (phone: string) => void
+interface StepEmailProps {
+    onComplete: (email: string) => void
 }
 
-export default function StepPhone({ onComplete }: StepPhoneProps) {
-    const [phone, setPhone] = useState('')
-    const [stage, setStage] = useState<'PHONE' | 'OTP'>('PHONE')
+export default function StepEmail({ onComplete }: StepEmailProps) {
+    const [email, setEmail] = useState('')
+    const [stage, setStage] = useState<'EMAIL' | 'OTP'>('EMAIL')
     const [otp, setOtp] = useState(['', '', '', '', '', ''])
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
@@ -23,19 +23,21 @@ export default function StepPhone({ onComplete }: StepPhoneProps) {
         return () => clearTimeout(t)
     }, [countdown])
 
-    function handlePhoneChange(val: string) {
-        const digits = val.replace(/\D/g, '').slice(0, 10)
-        setPhone(digits)
+    function handleEmailChange(val: string) {
+        setEmail(val)
         setError('')
     }
 
     async function handleSendOtp() {
-        if (phone.length !== 10) return
+        if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+            setError('Please enter a valid email address')
+            return
+        }
         setLoading(true)
         setError('')
         try {
-            // TODO: call Supabase SMS OTP when credentials are configured
-            // await supabase.auth.signInWithOtp({ phone: `+91${phone}` })
+            // TODO: call Supabase Email OTP when credentials are configured
+            // await supabase.auth.signInWithOtp({ email })
             await new Promise(r => setTimeout(r, 800)) // simulate network
             setStage('OTP')
             setCountdown(60)
@@ -86,18 +88,18 @@ export default function StepPhone({ onComplete }: StepPhoneProps) {
         setError('')
         try {
             // TODO: real Supabase OTP verification
-            // const { error } = await supabase.auth.verifyOtp({ phone: `+91${phone}`, token: code, type: 'sms' })
+            // const { error } = await supabase.auth.verifyOtp({ email, token: code, type: 'email' })
             await new Promise(r => setTimeout(r, 600))
 
             // Dev mode: any 6-digit OTP passes
             if (code.length === 6) {
-                onComplete(`+91${phone}`)
+                onComplete(email)
             }
         } catch {
             setAttempts(a => a - 1)
             setError(`Incorrect OTP. ${attempts - 1} attempt${attempts - 1 !== 1 ? 's' : ''} remaining.`)
             if (attempts <= 1) {
-                setStage('PHONE')
+                setStage('EMAIL')
                 setOtp(['', '', '', '', '', ''])
                 setAttempts(3)
             }
@@ -113,13 +115,13 @@ export default function StepPhone({ onComplete }: StepPhoneProps) {
                     Enter the OTP
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', fontSize: 15, marginBottom: 4 }}>
-                    We sent a 6-digit code to <strong style={{ color: 'var(--text-primary)' }}>+91 {phone}</strong>
+                    We sent a 6-digit code to <strong style={{ color: 'var(--text-primary)' }}>{email}</strong>
                 </p>
                 <button
-                    onClick={() => { setStage('PHONE'); setOtp(['', '', '', '', '', '']) }}
+                    onClick={() => { setStage('EMAIL'); setOtp(['', '', '', '', '', '']) }}
                     style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 14, cursor: 'pointer', padding: 0, marginBottom: 36 }}
                 >
-                    Change number
+                    Change email
                 </button>
 
                 {/* OTP boxes */}
@@ -177,28 +179,20 @@ export default function StepPhone({ onComplete }: StepPhoneProps) {
                 Welcome to ExamTracker 👋
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: 15, marginBottom: 36 }}>
-                Enter your phone number to get started. No passwords, ever.
+                Enter your email address to get started. No passwords, ever.
             </p>
 
-            {/* Phone input */}
+            {/* Email input */}
             <div style={{ position: 'relative', marginBottom: 16 }}>
-                <div style={{
-                    position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text-secondary)', fontSize: 16, fontWeight: 500,
-                    pointerEvents: 'none', userSelect: 'none',
-                }}>
-                    +91
-                </div>
                 <input
                     className={`input${error ? ' error' : ''}`}
-                    type="tel"
-                    inputMode="numeric"
-                    placeholder="98765 43210"
-                    value={phone}
-                    onChange={e => handlePhoneChange(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && phone.length === 10 && handleSendOtp()}
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={e => handleEmailChange(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) && handleSendOtp()}
                     autoFocus
-                    style={{ paddingLeft: 52 }}
+                    style={{ paddingLeft: 16 }}
                 />
             </div>
 
@@ -207,7 +201,7 @@ export default function StepPhone({ onComplete }: StepPhoneProps) {
             <button
                 className="btn btn-primary btn-full"
                 onClick={handleSendOtp}
-                disabled={phone.length !== 10 || loading}
+                disabled={!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) || loading}
                 style={{ marginBottom: 16 }}
             >
                 {loading ? 'Sending…' : 'Send OTP'}

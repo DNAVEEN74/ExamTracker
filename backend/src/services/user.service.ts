@@ -34,17 +34,17 @@ export async function getUserWithProfile(userId: string): Promise<UserWithProfil
 /** Create the users table row after first OTP verification */
 export async function createUser(data: {
     id: string
-    phone: string
+    email: string
     display_name?: string
 }) {
     const { data: user, error } = await supabase
         .from('users')
         .insert({
             id: data.id,
-            phone: data.phone,
+            email: data.email,
             display_name: data.display_name ?? 'Aspirant',
-            phone_verified: true,
-            auth_provider: 'phone',
+            email_verified: true,
+            auth_provider: 'email',
         })
         .select()
         .single()
@@ -117,22 +117,3 @@ export async function userExists(userId: string): Promise<boolean> {
     return !!data
 }
 
-/** Update subscription fields after Razorpay webhook */
-export async function updateSubscription(
-    userId: string,
-    data: {
-        subscription_tier: 'FREE' | 'PREMIUM' | 'PREMIUM_ANNUAL'
-        subscription_start?: string
-        subscription_end?: string
-        razorpay_customer_id?: string
-        razorpay_subscription_id?: string
-    }
-) {
-    const { error } = await supabase
-        .from('users')
-        .update({ ...data, updated_at: new Date().toISOString() })
-        .eq('id', userId)
-
-    if (error) throw new Error(`Failed to update subscription: ${error.message}`)
-    return true
-}

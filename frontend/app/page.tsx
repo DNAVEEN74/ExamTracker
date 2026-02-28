@@ -126,27 +126,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Premium Teaser (non-paywalled) ───────────────── */}
-      <section style={{ borderTop: '1px solid var(--border)', padding: '48px 24px' }}>
-        <div style={{
-          maxWidth: 480, margin: '0 auto',
-          background: 'var(--accent-light)',
-          border: '1px solid rgba(255,107,53,0.2)',
-          borderRadius: 'var(--radius-lg)', padding: '28px 24px', textAlign: 'center',
-        }}>
-          <p className="text-xl" style={{ color: 'var(--text-primary)', marginBottom: 8 }}>
-            WhatsApp alerts — ₹399/year
-          </p>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: 16 }}>
-            98% open rate vs. 15% email. Admit card released? You&apos;ll know within minutes.
-            Less than one exam application fee per year.
-          </p>
-          <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-            Available after your free account is set up.
-          </p>
-        </div>
-      </section>
-
       {/* ── Final CTA ────────────────────────────────────── */}
       <section style={{ borderTop: '1px solid var(--border)', padding: '64px 24px 80px', textAlign: 'center' }}>
         <div style={{ maxWidth: 380, margin: '0 auto' }}>

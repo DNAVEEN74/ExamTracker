@@ -1,7 +1,6 @@
 // ─── Enum Types (match PostgreSQL ENUMs exactly) ─────────────────────────────
 
 export type OnboardingMode = 'FOCUSED' | 'DISCOVERY' | 'VACANCY_AWARE' | 'COMPREHENSIVE'
-export type SubscriptionTier = 'FREE' | 'PREMIUM' | 'PREMIUM_ANNUAL'
 export type Category = 'GENERAL' | 'OBC_NCL' | 'OBC_CL' | 'SC' | 'ST' | 'EWS'
 export type QualificationLevel =
     | 'CLASS_10' | 'CLASS_12' | 'ITI' | 'DIPLOMA'
@@ -33,21 +32,14 @@ export type StateCode =
 
 export interface User {
     id: string
-    phone: string | null
     email: string | null
     display_name: string
-    phone_verified: boolean
     email_verified: boolean
-    auth_provider: 'phone' | 'google'
+    auth_provider: 'email' | 'google'
     google_id: string | null
     onboarding_mode: OnboardingMode
     onboarding_completed: boolean
     onboarding_step: number
-    subscription_tier: SubscriptionTier
-    subscription_start: string | null
-    subscription_end: string | null
-    razorpay_customer_id: string | null
-    razorpay_subscription_id: string | null
     created_at: string
     updated_at: string
     last_active_at: string
@@ -104,10 +96,6 @@ export interface NotificationPreferences {
     email_enabled: boolean
     email_frequency: 'IMMEDIATE' | 'DAILY' | 'WEEKLY'
     push_enabled: boolean
-    whatsapp_enabled: boolean
-    sms_enabled: boolean
-    whatsapp_consent_timestamp: string | null
-    whatsapp_consent_ip: string | null
     alert_new_eligible_exam: boolean
     alert_deadline_approaching: boolean
     alert_deadline_days_before: number

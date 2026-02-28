@@ -142,7 +142,6 @@ export async function createDefaultPreferences(userId: string) {
                 email_frequency: 'WEEKLY',
                 push_enabled: true,
                 whatsapp_enabled: false,
-                sms_enabled: false,
                 alert_new_eligible_exam: true,
                 alert_deadline_approaching: true,
                 alert_deadline_days_before: 7,

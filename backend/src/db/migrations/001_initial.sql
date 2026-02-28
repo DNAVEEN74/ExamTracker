@@ -6,7 +6,6 @@
 -- ─── Step 1: Create all ENUM types ───────────────────────────────────────────
 
 CREATE TYPE onboarding_mode_enum AS ENUM ('FOCUSED', 'DISCOVERY', 'VACANCY_AWARE', 'COMPREHENSIVE');
-CREATE TYPE subscription_tier_enum AS ENUM ('FREE', 'PREMIUM', 'PREMIUM_ANNUAL');
 CREATE TYPE category_enum AS ENUM ('GENERAL', 'OBC_NCL', 'OBC_CL', 'SC', 'ST', 'EWS');
 CREATE TYPE nationality_enum AS ENUM ('INDIAN', 'NEPAL_BHUTAN', 'PIO', 'OCI');
 CREATE TYPE gender_enum AS ENUM ('MALE', 'FEMALE', 'THIRD_GENDER', 'PREFER_NOT_TO_SAY');
@@ -37,27 +36,18 @@ CREATE TYPE state_code_enum AS ENUM (
 CREATE TABLE users (
     -- Identity
     id                  UUID PRIMARY KEY,  -- Same ID as auth.users.id — no separate PK
-    phone               VARCHAR(15) UNIQUE,
     email               VARCHAR(255) UNIQUE,
     display_name        VARCHAR(50) NOT NULL DEFAULT 'Aspirant',
 
     -- Auth
-    phone_verified      BOOLEAN DEFAULT FALSE,
     email_verified      BOOLEAN DEFAULT FALSE,
-    auth_provider       VARCHAR(20) DEFAULT 'phone',
+    auth_provider       VARCHAR(20) DEFAULT 'email',
     google_id           VARCHAR(100) UNIQUE,
 
     -- Onboarding state
     onboarding_mode     onboarding_mode_enum NOT NULL DEFAULT 'DISCOVERY',
     onboarding_completed BOOLEAN DEFAULT FALSE,
     onboarding_step     SMALLINT DEFAULT 0,
-
-    -- Subscription
-    subscription_tier   subscription_tier_enum DEFAULT 'FREE',
-    subscription_start  TIMESTAMPTZ,
-    subscription_end    TIMESTAMPTZ,
-    razorpay_customer_id VARCHAR(100),
-    razorpay_subscription_id VARCHAR(100),
 
     -- Metadata
     created_at          TIMESTAMPTZ DEFAULT NOW(),
@@ -132,12 +122,6 @@ CREATE TABLE notification_preferences (
     email_enabled       BOOLEAN DEFAULT TRUE,
     email_frequency     VARCHAR(20) DEFAULT 'WEEKLY',
     push_enabled        BOOLEAN DEFAULT TRUE,
-    whatsapp_enabled    BOOLEAN DEFAULT FALSE,
-    sms_enabled         BOOLEAN DEFAULT FALSE,
-
-    -- WhatsApp DPDPA 2023 compliance (immutable consent record)
-    whatsapp_consent_timestamp  TIMESTAMPTZ,
-    whatsapp_consent_ip         INET,
 
     -- Alert types
     alert_new_eligible_exam     BOOLEAN DEFAULT TRUE,
@@ -259,7 +243,7 @@ CREATE TABLE notification_log (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     exam_id         UUID REFERENCES exams(id) ON DELETE SET NULL,
-    channel         VARCHAR(20) NOT NULL,  -- 'EMAIL' | 'PUSH' | 'WHATSAPP' | 'SMS'
+    channel         VARCHAR(20) NOT NULL,  -- 'EMAIL' | 'PUSH'
     type            VARCHAR(50) NOT NULL,  -- 'NEW_EXAM' | 'DEADLINE' | 'ADMIT_CARD' | 'RESULT'
     subject         TEXT,
     resend_email_id VARCHAR(200),         -- Resend's message ID for webhook tracking
@@ -293,7 +277,7 @@ CREATE INDEX idx_exams_vacancies ON exams USING GIN(vacancies_by_category);
 CREATE INDEX idx_exams_active_end ON exams(is_active, application_end, category);
 
 -- User lookups
-CREATE INDEX idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
+CREATE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
 CREATE INDEX idx_users_last_active ON users(last_active_at);
 CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
 

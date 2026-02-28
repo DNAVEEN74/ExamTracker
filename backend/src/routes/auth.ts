@@ -12,8 +12,8 @@ router.use(authRateLimiter)
 
 /**
  * POST /api/v1/auth/send-otp
- * Trigger Supabase phone OTP. Supabase handles the SMS via configured provider (Twilio/MSG91).
- * Body: { phone: string }  — must be +91XXXXXXXXXX format
+ * Trigger Supabase email OTP. Supabase handles the email transport via Resend.
+ * Body: { email: string }
  */
 router.post('/send-otp', async (req, res) => {
     try {
@@ -21,9 +21,9 @@ router.post('/send-otp', async (req, res) => {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message })
         }
-        const { phone } = parsed.data
+        const { email } = parsed.data
 
-        const { error } = await supabase.auth.signInWithOtp({ phone })
+        const { error } = await supabase.auth.signInWithOtp({ email })
         if (error) {
             // Supabase rate-limits OTP requests automatically
             return res.status(429).json({ success: false, error: error.message })
@@ -40,7 +40,7 @@ router.post('/send-otp', async (req, res) => {
  * POST /api/v1/auth/verify-otp
  * Verify the 6-digit OTP and return JWT session + is_new_user flag.
  * Creates a user row in our `users` table if this is the first login.
- * Body: { phone: string, token: string }
+ * Body: { email: string, token: string }
  */
 router.post('/verify-otp', async (req, res) => {
     try {
@@ -48,12 +48,12 @@ router.post('/verify-otp', async (req, res) => {
         if (!parsed.success) {
             return res.status(400).json({ success: false, error: parsed.error.errors[0].message })
         }
-        const { phone, token } = parsed.data
+        const { email, token } = parsed.data
 
         const { data, error } = await supabase.auth.verifyOtp({
-            phone,
+            email,
             token,
-            type: 'sms',
+            type: 'email',
         })
 
         if (error || !data.session) {
@@ -64,7 +64,7 @@ router.post('/verify-otp', async (req, res) => {
         const isNewUser = !(await userService.userExists(supabaseUser.id))
 
         if (isNewUser) {
-            await userService.createUser({ id: supabaseUser.id, phone })
+            await userService.createUser({ id: supabaseUser.id, email })
             // Create default notification preferences row
             await notificationService.createDefaultPreferences(supabaseUser.id)
         }

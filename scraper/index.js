@@ -6,8 +6,9 @@
  * Architecture:
  *   Hash store  → scraper_log.content_hash in Supabase (survives Railway restarts)
  *   PDF storage → Supabase Storage at /raw-pdfs/{site_id}/{YYYY}/{MM}/{sha256}.pdf
- *   Dedup       → pdf_hashes table (SHA-256 on raw PDF bytes)
- *   Handoff     → POST /api/webhooks/new-pdf (triggers PDF parsing pipeline)
+ *   Dedup       → pdf_hashes table (SHA-256 on raw PDF bytes — kept FOREVER, ~40 bytes each)
+ *   PDF cleanup → Main app deletes the actual PDF file after AI parsing (hash stays forever)
+ *   Handoff     → POST /api/webhooks/new-pdf (triggers AI parsing pipeline)
  *   Scheduling  → Railway native cron jobs (NOT node-cron)
  *
  * Run locally:
@@ -39,6 +40,15 @@ const logger = pino({
         : undefined,
 })
 
+// ─── Startup Validation ───────────────────────────────────────────────────────
+
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k])
+if (missingEnv.length > 0) {
+    console.error(`[FATAL] Missing required environment variables: ${missingEnv.join(', ')}`)
+    process.exit(1)
+}
+
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
 const supabase = createClient(
@@ -46,15 +56,6 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     { auth: { persistSession: false } }
 )
-
-// ─── Startup Validation ─────────────────────────────────────────────────────────
-// Fail fast with a clear error rather than failing silently on the first DB call
-const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
-const missingEnv = REQUIRED_ENV.filter(k => !process.env[k])
-if (missingEnv.length > 0) {
-    console.error(`[FATAL] Missing required environment variables: ${missingEnv.join(', ')}`)
-    process.exit(1)
-}
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -68,11 +69,12 @@ const CONFIG = {
     webhookSecret: process.env.SCRAPER_WEBHOOK_SECRET || null,
     userAgent: 'ExamTrackerBot/1.0 (+https://examtracker.in/bot)',
     storage: { bucket: 'raw-pdfs' },
+    // PDF file lifecycle: delete from Storage after this many hours if webhook never fires
+    // The SHA-256 hash in pdf_hashes stays FOREVER for dedup (only ~40 bytes per row)
+    pdfTtlHours: parseInt(process.env.PDF_TTL_HOURS || '24'),
 }
 
 // ─── Supabase Hash Store ──────────────────────────────────────────────────────
-// Replaces the old JSON file hash store.
-// Supabase DB persists across Railway deploys and restarts.
 
 async function getLastContentHash(siteId) {
     const { data } = await supabase
@@ -95,7 +97,9 @@ async function writeScraperLog(entry) {
 }
 
 // ─── PDF Deduplication ───────────────────────────────────────────────────────
-// SHA-256 on raw bytes (not URL) — content-addressed, survives filename changes.
+// SHA-256 hash rows stay FOREVER in pdf_hashes.
+// The actual PDF file is deleted by the main app after AI parsing.
+// This separation means: no re-download, no re-parse, no re-notify — ever.
 
 async function isPdfAlreadySeen(sha256) {
     const { data, error } = await supabase
@@ -158,27 +162,30 @@ async function recordIngestionLog(entry) {
 }
 
 // ─── Webhook → Main App ───────────────────────────────────────────────────────
-// Non-fatal: if this fails, the pdf_ingestion_log row stays QUEUED
-// and the recovery pg_cron in the backend picks it up.
 
 async function notifyMainApp(payload) {
     if (!CONFIG.parsingWebhookUrl) {
-        // Local dev: no main app running
-        logger.info({ site: payload.site_id, hash: payload.pdf_hash?.slice(0, 12) },
-            '[DEV] Skipping webhook — set PARSING_WEBHOOK_URL to enable')
-        return
+        logger.info(
+            { site: payload.site_id, hash: payload.pdf_hash?.slice(0, 12) },
+            '[DEV] Skipping webhook — set PARSING_WEBHOOK_URL to enable'
+        )
+        return { success: false, skipped: true }
     }
     try {
-        await axios.post(CONFIG.parsingWebhookUrl, payload, {
+        const res = await axios.post(CONFIG.parsingWebhookUrl, payload, {
             headers: {
                 'Content-Type': 'application/json',
                 'x-scraper-secret': CONFIG.webhookSecret,
             },
-            timeout: 10_000,
+            timeout: 60_000,   // AI parsing can take up to 30s — give it time
         })
+        return res.data
     } catch (err) {
-        logger.warn({ err: err.message, site: payload.site_id },
-            'Webhook POST failed — PDF is stored, recovery cron will requeue')
+        logger.warn(
+            { err: err.message, site: payload.site_id },
+            'Webhook POST failed — PDF is stored, recovery flow will requeue'
+        )
+        return { success: false, error: err.message }
     }
 }
 
@@ -204,9 +211,8 @@ class PageFetcher {
             headers: { 'User-Agent': CONFIG.userAgent },
             timeout: CONFIG.timeoutMs,
             maxRedirects: 5,
-            // Stream the response so we can check size before loading into memory
             responseType: 'text',
-            maxContentLength: 10 * 1024 * 1024, // 10MB hard limit per site (typical pages are <1MB)
+            maxContentLength: 10 * 1024 * 1024,
         })
         return { html: response.data, httpStatus: response.status }
     }
@@ -215,11 +221,18 @@ class PageFetcher {
         const page = await this.browser.newPage()
         await page.setExtraHTTPHeaders({ 'User-Agent': CONFIG.userAgent })
         try {
+            // Use 'domcontentloaded' instead of 'networkidle' to avoid hanging on
+            // government portals that have infinite polling/keep-alive connections.
             const response = await page.goto(url, {
-                waitUntil: 'networkidle',
+                waitUntil: 'domcontentloaded',
                 timeout: CONFIG.timeoutMs,
             })
-            await page.waitForTimeout(2000)
+            // Wait for lazy-loaded notification sections to render
+            await page.waitForTimeout(3000)
+            // Attempt to also wait for any table/list elements to appear
+            await page.waitForSelector('table, ul, .notification, .notice, #main-content', {
+                timeout: 5000
+            }).catch(() => { /* selector not found — proceed anyway */ })
             return { html: await page.content(), httpStatus: response?.status() ?? 200 }
         } finally {
             await page.close()
@@ -248,18 +261,28 @@ class PageFetcher {
 
 function hashNotificationSection(html) {
     const $ = cheerio.load(html)
+    // Remove everything that changes without new content (ads, counters, nav)
     $('script, style, nav, header, footer, .ads, #ads, .advertisement, iframe, img').remove()
+    $('[class*="counter"], [class*="visitor"], [id*="counter"], [id*="visitor"]').remove()
+    $('time, .datetime, .timestamp, .clock').remove()
 
-    // Try to find the notification content section specifically
-    let content = ''
+    // Government sites use varied class names — try the most specific first
     const candidateSelectors = [
-        'table',
-        '.notification', '.notice', '.recruitment', '#notifications',
-        '.content-area a', 'ul li a', '#main-content',
+        // Notification-specific
+        '#notification-list', '.notification-list', '#notif-box', '.notif-section',
+        '#news-updates', '.news-scroll', '.marquee',
+        // Common recruitment page patterns
+        '#recruitment', '.recruitment-notice', '#vacancy', '.vacancy-list',
+        '#advertisement', '.advt-list', '#notice-board', '.notice-board',
+        // Generic fallbacks
+        'table', '.content-area', '#main-content', '#content', 'main', 'article',
+        'ul li a', '.content', '#container',
     ]
+
+    let content = ''
     for (const sel of candidateSelectors) {
-        const found = $(sel).text().trim()
-        if (found.length > 100) { content = found; break }
+        const found = $(sel).first().text().trim()
+        if (found.length > 150) { content = found; break }
     }
     if (!content) content = $('body').text().trim()
 
@@ -283,18 +306,31 @@ function extractPdfLinks(html, baseUrl) {
         links.push({
             url: absoluteUrl,
             link_text: $(el).text().trim().slice(0, 500),
-            context: $(el).closest('tr, li, div').text().trim().slice(0, 1000),
+            context: $(el).closest('tr, li, div, section').text().trim().slice(0, 1000),
         })
     })
 
     // Strategy 2: onclick handlers containing PDF URLs
     $('[onclick]').each((_, el) => {
         const onclick = $(el).attr('onclick') || ''
-        const match = onclick.match(/['"]([^'"]*\.pdf[^'"]*)['"]/i)
+        const match = onclick.match(/['"]([^'"]*\.pdf[^'"]*)['\"]/i)
         if (!match) return
         try {
             links.push({
                 url: new URL(match[1], baseUrl).toString(),
+                link_text: $(el).text().trim().slice(0, 500),
+                context: $(el).closest('tr, li, div').text().trim().slice(0, 1000),
+            })
+        } catch { }
+    })
+
+    // Strategy 3: data-href / data-url attributes with PDF paths
+    $('[data-href*=".pdf"], [data-url*=".pdf"], [data-src*=".pdf"]').each((_, el) => {
+        const href = $(el).attr('data-href') || $(el).attr('data-url') || $(el).attr('data-src') || ''
+        if (!href.toLowerCase().includes('.pdf')) return
+        try {
+            links.push({
+                url: new URL(href, baseUrl).toString(),
                 link_text: $(el).text().trim().slice(0, 500),
                 context: '',
             })
@@ -338,33 +374,49 @@ async function fetchRssLinks(rssUrl) {
 }
 
 // ─── PDF Processor ────────────────────────────────────────────────────────────
-// Download → SHA-256 → check dedup → upload → log → webhook
+// Download → SHA-256 → dedup check → upload → log → webhook (main app handles parse + delete)
 
 async function processPdfLink(link, site) {
-    // Download
+    // Download with retry
     let pdfBuffer
-    try {
-        const res = await axios.get(link.url, {
-            responseType: 'arraybuffer',
-            headers: { 'User-Agent': CONFIG.userAgent },
-            timeout: CONFIG.timeoutMs,
-        })
-        pdfBuffer = Buffer.from(res.data)
-    } catch (err) {
-        logger.warn({ url: link.url, err: err.message }, 'PDF download failed')
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const res = await axios.get(link.url, {
+                responseType: 'arraybuffer',
+                headers: { 'User-Agent': CONFIG.userAgent },
+                timeout: CONFIG.timeoutMs,
+            })
+            pdfBuffer = Buffer.from(res.data)
+            break
+        } catch (err) {
+            if (attempt === 2) {
+                logger.warn({ url: link.url, err: err.message }, 'PDF download failed after 2 attempts')
+                return null
+            }
+            await sleep(2000)
+        }
+    }
+
+    // Validate it's actually a PDF
+    if (!pdfBuffer || pdfBuffer.length < 1000) {
+        logger.warn({ url: link.url, bytes: pdfBuffer?.length }, 'PDF too small — skipping')
+        return null
+    }
+    if (pdfBuffer.slice(0, 4).toString() !== '%PDF') {
+        logger.warn({ url: link.url }, 'Response is not a PDF — skipping')
         return null
     }
 
-    // SHA-256 on raw bytes (not URL)
+    // SHA-256 on raw bytes
     const sha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex')
 
-    // Deduplication — same PDF linked from multiple sites
+    // Deduplication — same PDF content won't be reprocessed (hash lives forever)
     if (await isPdfAlreadySeen(sha256)) {
         logger.debug({ site: site.id, hash: sha256.slice(0, 12) }, 'Duplicate PDF — skip')
         return null
     }
 
-    // Upload to Supabase Storage
+    // Upload to Supabase Storage (temporary — main app deletes after AI parsing)
     let storagePath
     try {
         storagePath = await uploadPdfToStorage(pdfBuffer, site.id, sha256)
@@ -373,7 +425,7 @@ async function processPdfLink(link, site) {
         return null
     }
 
-    // Record in pdf_hashes
+    // Record hash IMMEDIATELY — prevents any future scrape from re-downloading
     await recordPdfHash({ hash: sha256, source_url: link.url, site_id: site.id, storage_path: storagePath })
 
     // Record in pdf_ingestion_log
@@ -387,8 +439,8 @@ async function processPdfLink(link, site) {
         status: 'QUEUED',
     })
 
-    // Fire webhook → main app starts parsing pipeline
-    await notifyMainApp({
+    // Fire webhook → main app: downloads, AI-parses, inserts to exams table, deletes PDF
+    const webhookResult = await notifyMainApp({
         site_id: site.id,
         site_name: site.name,
         category: site.category,
@@ -402,7 +454,12 @@ async function processPdfLink(link, site) {
         scraped_at: new Date().toISOString(),
     })
 
-    logger.info({ site: site.id, hash: sha256.slice(0, 12), path: storagePath }, '✅ New PDF queued')
+    if (webhookResult?.success) {
+        logger.info({ site: site.id, hash: sha256.slice(0, 12), exam: webhookResult.name }, '✅ PDF parsed and exam saved')
+    } else if (!webhookResult?.skipped) {
+        logger.warn({ site: site.id, hash: sha256.slice(0, 12) }, '⏳ Webhook deferred — pg_cron will retry')
+    }
+
     return sha256
 }
 
@@ -457,7 +514,6 @@ async function processSite(site, fetcher) {
         if (result) processed.push(result)
     }
 
-    // Update hash store only after processing
     await writeScraperLog({ site_id: site.id, status: 'OK', content_hash: newHash, http_status: httpStatus, duration_ms: Date.now() - startMs, new_pdfs_found: processed.length })
     return { siteId: site.id, status: 'OK', newPdfs: processed.length }
 }
@@ -468,7 +524,6 @@ async function main() {
     logger.info({ priorities: CONFIG.priorityFilter, site: CONFIG.siteIdFilter ?? 'all' },
         'ExamTracker Scraper starting')
 
-    // Load sites config
     const sitesJson = JSON.parse(
         await readFile(join(__dirname, 'sites.json'), 'utf8')
     )
@@ -486,12 +541,10 @@ async function main() {
 
     logger.info({ total: allSites.length }, 'Sites loaded')
 
-    // One shared Playwright browser for all JS-rendered sites
     const fetcher = new PageFetcher()
     const needsPlaywright = allSites.some(s => s.scrape_method === 'js_render')
     if (needsPlaywright) await fetcher.init()
 
-    // Run with concurrency limit (max 3 parallel — don't hammer government servers)
     const limit = pLimit(CONFIG.concurrency)
     const results = await Promise.all(
         allSites.map(site => limit(() => processSite(site, fetcher)))
@@ -509,7 +562,6 @@ async function main() {
 
     logger.info(summary, 'Run complete')
 
-    // Exit 1 if P0 sites failed (Railway can trigger alerts on non-zero exit)
     const p0Ids = allSites.filter(s => s.priority === 'P0').map(s => s.id)
     const p0Failed = results.filter(r => p0Ids.includes(r.siteId) && r.status === 'ERROR').length
     if (p0Failed > 0) {

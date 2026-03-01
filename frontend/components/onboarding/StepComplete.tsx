@@ -1,91 +1,76 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Check } from 'lucide-react'
 
 interface StepCompleteProps {
     displayName: string
-    onSave: () => Promise<void>
+    onSave: () => void
 }
 
 export default function StepComplete({ displayName, onSave }: StepCompleteProps) {
-    const router = useRouter()
+    const [mounted, setMounted] = useState(false)
     const [saving, setSaving] = useState(false)
-    const [done, setDone] = useState(false)
 
-    // Immediately trigger save + redirect
     useEffect(() => {
-        async function finish() {
-            setSaving(true)
-            try {
-                await onSave()
-                setDone(true)
-                setTimeout(() => router.push('/dashboard'), 1500)
-            } finally {
-                setSaving(false)
-            }
-        }
-        finish()
-    }, []) // eslint-disable-line
+        setMounted(true)
+    }, [])
 
     return (
-        <div style={{ textAlign: 'center', paddingTop: 40 }}>
-            {/* Animated checkmark */}
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+
             <div style={{
-                width: 72, height: 72, borderRadius: '50%',
-                background: 'var(--success-light)',
-                border: '2px solid rgba(16,185,129,0.3)',
+                width: 80, height: 80, borderRadius: '50%', background: '#32d74b',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 24px',
-                fontSize: 32,
-                animation: done ? 'none' : 'pulse 1s infinite',
+                marginBottom: 32,
+                transform: mounted ? 'scale(1)' : 'scale(0.5)',
+                opacity: mounted ? 1 : 0,
+                transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s',
+                boxShadow: '0 8px 32px rgba(50, 215, 75, 0.4)'
             }}>
-                {done ? '✓' : '⏳'}
+                <Check size={40} color="#000" strokeWidth={3} />
             </div>
 
-            <h2 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>
-                {done ? `You're all set, ${displayName}!` : 'Setting up your profile…'}
-            </h2>
+            <h1 style={{
+                fontSize: 'clamp(32px, 7vw, 40px)', fontWeight: 700, color: '#fff',
+                letterSpacing: '-0.02em', marginBottom: 16, lineHeight: 1.15,
+                transform: mounted ? 'translateY(0)' : 'translateY(10px)',
+                opacity: mounted ? 1 : 0,
+                transition: 'transform 0.5s ease 0.1s, opacity 0.5s 0.1s'
+            }}>
+                You're all set,<br />{displayName.split(' ')[0]}.
+            </h1>
 
-            <p style={{ color: 'var(--text-secondary)', fontSize: 15, lineHeight: 1.65, marginBottom: 32 }}>
-                {done
-                    ? 'Taking you to your personalised exam dashboard.'
-                    : 'Running eligibility checks across all central government exams…'}
+            <p style={{
+                color: '#a1a1a6', fontSize: 17, marginBottom: 48, lineHeight: 1.4,
+                transform: mounted ? 'translateY(0)' : 'translateY(10px)',
+                opacity: mounted ? 1 : 0,
+                transition: 'transform 0.5s ease 0.2s, opacity 0.5s 0.2s'
+            }}>
+                Your profile is personalized. We'll automatically match you with eligible exams and notify you of upcoming deadlines.
             </p>
 
-            {/* Loading steps  */}
-            {!done && (
-                <div style={{ textAlign: 'left', maxWidth: 300, margin: '0 auto' }}>
-                    {[
-                        'Checking age limits per category…',
-                        'Matching qualification requirements…',
-                        'Filtering by domicile & exam states…',
-                        'Computing your vacancy counts…',
-                    ].map((step, i) => (
-                        <div key={i} style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '8px 0',
-                            opacity: saving ? 1 : 0.4,
-                            fontSize: 14, color: 'var(--text-secondary)',
-                        }}>
-                            <span style={{ color: 'var(--accent)', fontSize: 16 }}>
-                                {saving ? '⟳' : '○'}
-                            </span>
-                            {step}
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {saving && (
-                <button
-                    className="btn btn-ghost"
-                    onClick={() => router.push('/dashboard')}
-                    style={{ marginTop: 24 }}
-                >
-                    Skip and go to dashboard →
-                </button>
-            )}
+            <button
+                onClick={() => { setSaving(true); onSave(); }}
+                disabled={saving}
+                style={{
+                    background: '#fff',
+                    color: '#000',
+                    padding: '16px',
+                    borderRadius: 980,
+                    fontSize: 17,
+                    fontWeight: 600,
+                    border: 'none',
+                    cursor: saving ? 'wait' : 'pointer',
+                    transition: 'transform 0.2s, background 0.2s',
+                    width: '100%',
+                    transform: mounted ? 'translateY(0)' : 'translateY(10px)',
+                    opacity: mounted ? 1 : 0,
+                    transitionDelay: '0.3s'
+                }}
+            >
+                {saving ? 'Taking you there...' : 'Go to Dashboard'}
+            </button>
         </div>
     )
 }

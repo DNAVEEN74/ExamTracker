@@ -5,10 +5,10 @@ import { useState } from 'react'
 type Gender = 'MALE' | 'FEMALE' | 'THIRD_GENDER' | 'PREFER_NOT_TO_SAY'
 
 interface StepSpecialProps {
-    initialGender: Gender | null
-    initialIsPwd: boolean
-    initialPwdType: string
-    initialIsExServiceman: boolean
+    initialGender?: Gender | null
+    initialIsPwd?: boolean
+    initialPwdType?: string
+    initialIsExServiceman?: boolean
     onNext: (data: {
         gender: Gender
         isPwd: boolean
@@ -17,148 +17,153 @@ interface StepSpecialProps {
     }) => void
 }
 
-const GENDERS: { id: Gender; label: string }[] = [
-    { id: 'MALE', label: 'Male' },
-    { id: 'FEMALE', label: 'Female' },
-    { id: 'THIRD_GENDER', label: 'Third Gender' },
-    { id: 'PREFER_NOT_TO_SAY', label: 'Prefer not to say' },
-]
+export default function StepSpecial({
+    initialGender, initialIsPwd, initialPwdType, initialIsExServiceman, onNext
+}: StepSpecialProps) {
+    const [gender, setGender] = useState<Gender | null>(initialGender || null)
+    const [isPwd, setIsPwd] = useState(initialIsPwd || false)
+    const [pwdType, setPwdType] = useState(initialPwdType || '')
+    const [isEx, setIsEx] = useState(initialIsExServiceman || false)
+    const [error, setError] = useState('')
 
-const PWD_TYPES = [
-    'Locomotor Disability',
-    'Visual Impairment',
-    'Hearing Impairment',
-    'Intellectual Disability',
-    'Multiple Disabilities',
-    'Other',
-]
+    function handleNext() {
+        if (!gender) return setError('Please select a gender')
+        if (isPwd && !pwdType.trim()) return setError('Please specify PwD category')
 
-export default function StepSpecial({ initialGender, initialIsPwd, initialPwdType, initialIsExServiceman, onNext }: StepSpecialProps) {
-    const [gender, setGender] = useState<Gender | null>(initialGender)
-    const [isPwd, setIsPwd] = useState(initialIsPwd)
-    const [pwdType, setPwdType] = useState(initialPwdType)
-    const [isExServiceman, setIsExServiceman] = useState(initialIsExServiceman)
-
-    function handleSubmit() {
-        if (!gender) return
-        onNext({ gender, isPwd, pwdType, isExServiceman })
+        setError('')
+        onNext({
+            gender,
+            isPwd,
+            pwdType: pwdType.trim(),
+            isExServiceman: isEx,
+        })
     }
 
     return (
-        <div>
-            <h2 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
-                A few more details
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 28 }}>
-                These unlock additional reservations and age relaxations you may qualify for.
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <h1 style={{ fontSize: 'clamp(28px, 6vw, 36px)', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em', marginBottom: 12, lineHeight: 1.15 }}>
+                Final details
+            </h1>
+            <p style={{ color: '#a1a1a6', fontSize: 16, marginBottom: 32, lineHeight: 1.4 }}>
+                Gender and special categories affect application fees and specific post eligibility.
             </p>
 
-            {/* Gender */}
-            <p className="section-label" style={{ marginBottom: 10 }}>Gender</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 24 }}>
-                {GENDERS.map(g => (
-                    <div
-                        key={g.id}
-                        onClick={() => setGender(g.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={e => e.key === 'Enter' && setGender(g.id)}
-                        style={{
-                            padding: '14px 16px', borderRadius: 'var(--radius-sm)', textAlign: 'center',
-                            border: `2px solid ${gender === g.id ? 'var(--accent)' : 'var(--border)'}`,
-                            background: gender === g.id ? 'var(--accent-light)' : 'var(--background-card)',
-                            cursor: 'pointer', transition: 'all 0.15s ease',
-                            fontWeight: gender === g.id ? 600 : 400,
-                            fontSize: 14, color: 'var(--text-primary)',
-                        }}
-                    >
-                        {g.label}
+            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
+                {/* Gender Segmented Control */}
+                <div>
+                    <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#86868b', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Gender
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {[
+                            { id: 'MALE', label: 'Male' },
+                            { id: 'FEMALE', label: 'Female' },
+                            { id: 'THIRD_GENDER', label: 'Third Gender' },
+                        ].map(g => (
+                            <button
+                                key={g.id}
+                                onClick={() => { setGender(g.id as Gender); setError('') }}
+                                style={{
+                                    flex: 1, minWidth: '30%',
+                                    background: gender === g.id ? '#fff' : '#1c1c1e',
+                                    color: gender === g.id ? '#000' : '#86868b',
+                                    border: `1px solid ${gender === g.id ? '#fff' : 'rgba(255,255,255,0.1)'}`,
+                                    padding: '14px', borderRadius: 12, fontSize: 15, fontWeight: 600,
+                                    cursor: 'pointer', transition: 'all 0.2s'
+                                }}
+                            >
+                                {g.label}
+                            </button>
+                        ))}
                     </div>
-                ))}
-            </div>
-
-            {/* Women-specific note */}
-            {gender === 'FEMALE' && (
-                <div style={{
-                    background: 'var(--success-light)', border: '1px solid rgba(16,185,129,0.2)',
-                    borderRadius: 'var(--radius-sm)', padding: 12, marginBottom: 16,
-                    fontSize: 13, color: 'var(--success)',
-                }}>
-                    ✓ Women get 5-year age relaxation in many exams (SSC, Railway, Police). We&apos;ll factor this in.
                 </div>
-            )}
 
-            {/* Person with Disability */}
-            <div style={{ marginBottom: 16 }}>
+                {/* Ex-Serviceman Toggle */}
                 <label style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '14px 16px', marginBottom: isPwd ? 10 : 0,
-                    background: isPwd ? 'var(--accent-light)' : 'var(--background-card)',
-                    border: `2px solid ${isPwd ? 'var(--accent)' : 'var(--border)'}`,
-                    borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                    transition: 'all 0.15s ease',
+                    display: 'flex', alignItems: 'center', gap: 16, background: '#1c1c1e',
+                    padding: '16px 20px', borderRadius: 16, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.05)'
                 }}>
-                    <input
-                        type="checkbox"
-                        checked={isPwd}
-                        onChange={e => setIsPwd(e.target.checked)}
-                        style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }}
-                    />
-                    <div>
-                        <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-                            Person with Benchmark Disability (PwBD)
-                        </div>
-                        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                            40%+ disability — 3% reservation + 10-year age relaxation
-                        </div>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 17, fontWeight: 500, color: '#fff' }}>Ex-Serviceman</div>
+                        <div style={{ fontSize: 14, color: '#86868b' }}>Check if you served in Defence</div>
                     </div>
+                    {/* Apple switch */}
+                    <div style={{
+                        width: 50, height: 30, borderRadius: 100, background: isEx ? '#32d74b' : '#38383a',
+                        position: 'relative', transition: 'background 0.3s'
+                    }}>
+                        <div style={{
+                            width: 26, height: 26, borderRadius: '50%', background: '#fff',
+                            position: 'absolute', top: 2, left: isEx ? 22 : 2,
+                            transition: 'left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }} />
+                    </div>
+                    <input type="checkbox" checked={isEx} onChange={e => setIsEx(e.target.checked)} style={{ display: 'none' }} />
+                </label>
+
+                {/* PwD Toggle */}
+                <label style={{
+                    display: 'flex', alignItems: 'center', gap: 16, background: '#1c1c1e',
+                    padding: '16px 20px', borderRadius: 16, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.05)'
+                }}>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 17, fontWeight: 500, color: '#fff' }}>Person with Disability (PwD)</div>
+                        <div style={{ fontSize: 14, color: '#86868b' }}>Check for PwD relaxations</div>
+                    </div>
+                    <div style={{
+                        width: 50, height: 30, borderRadius: 100, background: isPwd ? '#32d74b' : '#38383a',
+                        position: 'relative', transition: 'background 0.3s'
+                    }}>
+                        <div style={{
+                            width: 26, height: 26, borderRadius: '50%', background: '#fff',
+                            position: 'absolute', top: 2, left: isPwd ? 22 : 2,
+                            transition: 'left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }} />
+                    </div>
+                    <input type="checkbox" checked={isPwd} onChange={e => setIsPwd(e.target.checked)} style={{ display: 'none' }} />
                 </label>
 
                 {isPwd && (
-                    <select
-                        className="input"
-                        value={pwdType}
-                        onChange={e => setPwdType(e.target.value)}
-                    >
-                        <option value="" disabled>Select disability type</option>
-                        {PWD_TYPES.map(t => (
-                            <option key={t} value={t}>{t}</option>
-                        ))}
-                    </select>
+                    <div style={{ animation: 'fadeUp 0.3s ease-out' }}>
+                        <input
+                            type="text"
+                            placeholder="Specify Type (e.g., OH, VH, HH)"
+                            value={pwdType}
+                            onChange={e => { setPwdType(e.target.value); setError('') }}
+                            style={{
+                                width: '100%', background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: 16, padding: '18px 20px', fontSize: 17, color: '#fff',
+                                outline: 'none', transition: 'border-color 0.2s'
+                            }}
+                            onFocus={e => e.target.style.borderColor = '#0a84ff'}
+                            onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.1)'}
+                        />
+                    </div>
                 )}
+
+                {error && <p style={{ color: '#ff3b30', fontSize: 14, fontWeight: 500, animation: 'fadeUp 0.2s' }}>{error}</p>}
             </div>
 
-            {/* Ex-serviceman */}
-            <label style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '14px 16px', marginBottom: 24,
-                background: isExServiceman ? 'var(--accent-light)' : 'var(--background-card)',
-                border: `2px solid ${isExServiceman ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                transition: 'all 0.15s ease',
-            }}>
-                <input
-                    type="checkbox"
-                    checked={isExServiceman}
-                    onChange={e => setIsExServiceman(e.target.checked)}
-                    style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }}
-                />
-                <div>
-                    <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-                        Ex-Serviceman / Defence Veteran
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                        Special quota + age relaxation equal to service period
-                    </div>
-                </div>
-            </label>
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                @keyframes fadeUp {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+            `}} />
 
             <button
-                className="btn btn-primary btn-full"
-                onClick={handleSubmit}
+                onClick={handleNext}
                 disabled={!gender}
+                style={{
+                    background: !gender ? '#2c2c2e' : '#fff',
+                    color: !gender ? '#86868b' : '#000',
+                    padding: '16px', borderRadius: 980, fontSize: 17, fontWeight: 600,
+                    border: 'none', cursor: !gender ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.2s, color 0.2s', width: '100%', marginTop: 'auto', flexShrink: 0
+                }}
             >
-                Continue
+                Done
             </button>
         </div>
     )

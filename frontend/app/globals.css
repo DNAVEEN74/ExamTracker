@@ -11,21 +11,22 @@
 
 :root {
   /* ── Backgrounds ── */
-  --background: #18181b;
-  /* Warm dark — not pure black */
-  --background-secondary: #232326;
-  --background-card: #2c2c30;
-  --background-elevated: #38383d;
+  --background: #000000;
+  /* Pure black for Apple dark mode */
+  --background-secondary: #1c1c1e;
+  --background-card: #2c2c2e;
+  --background-elevated: #38383a;
 
   /* ── Text ── */
-  --text-primary: #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --text-tertiary: #71717a;
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1a6;
+  --text-tertiary: #86868b;
 
-  /* ── Accent: ExamTracker Orange ── */
-  --accent: #ff6b35;
-  --accent-light: rgba(255, 107, 53, 0.10);
-  --accent-dark: #e65a2e;
+  /* ── Accent: Apple Blue ── */
+  --accent: #0a84ff;
+  --accent-light: rgba(10, 132, 255, 0.15);
+  --accent-dark: #006ee6;
+
 
   /* ── Status ── */
   --success: #10b981;

@@ -5,97 +5,78 @@ import { useState } from 'react'
 type Category = 'GENERAL' | 'OBC_NCL' | 'OBC_CL' | 'SC' | 'ST' | 'EWS'
 
 interface StepCategoryProps {
-    initialValue: Category | null
-    onNext: (category: Category) => void
+    initialValue?: Category | null
+    onNext: (c: Category) => void
 }
 
-const CATEGORIES = [
-    {
-        id: 'GENERAL' as Category,
-        label: 'General',
-        desc: 'No category reservation',
-    },
-    {
-        id: 'OBC_NCL' as Category,
-        label: 'OBC – Non Creamy Layer',
-        desc: 'Family income ≤ ₹8 lakh/year. Eligible for OBC reservation.',
-    },
-    {
-        id: 'OBC_CL' as Category,
-        label: 'OBC – Creamy Layer',
-        desc: 'Family income > ₹8 lakh/year. Treated as General in most exams.',
-    },
-    {
-        id: 'SC' as Category,
-        label: 'Scheduled Caste (SC)',
-        desc: 'Listed in the Scheduled Castes order.',
-    },
-    {
-        id: 'ST' as Category,
-        label: 'Scheduled Tribe (ST)',
-        desc: 'Listed in the Scheduled Tribes order.',
-    },
-    {
-        id: 'EWS' as Category,
-        label: 'Economically Weaker Section (EWS)',
-        desc: 'General category, family income < ₹8 lakh/year. 10% quota.',
-    },
+const CATEGORIES: { id: Category; label: string; desc?: string }[] = [
+    { id: 'GENERAL', label: 'General / Unreserved (UR)' },
+    { id: 'EWS', label: 'Economically Weaker Section (EWS)', desc: '10% Reservation in mostly all Central/State exams' },
+    { id: 'OBC_NCL', label: 'OBC - Non Creamy Layer', desc: '27% Reservation + 3 Years Age Relaxation generally' },
+    { id: 'OBC_CL', label: 'OBC - Creamy Layer', desc: 'Considered as General for Central Exams' },
+    { id: 'SC', label: 'Scheduled Caste (SC)', desc: '15% Reservation + 5 Years Age Relaxation generally' },
+    { id: 'ST', label: 'Scheduled Tribe (ST)', desc: '7.5% Reservation + 5 Years Age Relaxation generally' },
 ]
 
 export default function StepCategory({ initialValue, onNext }: StepCategoryProps) {
-    const [selected, setSelected] = useState<Category | null>(initialValue)
+    const [selected, setSelected] = useState<Category | null>(initialValue || null)
 
     return (
-        <div>
-            <h2 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
-                What is your category?
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 28 }}>
-                This determines your age limit, fee waiver, and reserved vacancies.
-                We never share or display this to anyone.
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <h1 style={{ fontSize: 'clamp(32px, 7vw, 40px)', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em', marginBottom: 16, lineHeight: 1.15 }}>
+                What is your<br />category?
+            </h1>
+            <p style={{ color: '#a1a1a6', fontSize: 17, marginBottom: 40, lineHeight: 1.4 }}>
+                This is strictly used for matching you with the correct relaxations and vacancy counts.
             </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, overflowY: 'auto', paddingBottom: 24 }}>
                 {CATEGORIES.map(cat => (
-                    <div
+                    <button
                         key={cat.id}
                         onClick={() => setSelected(cat.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={e => e.key === 'Enter' && setSelected(cat.id)}
                         style={{
-                            padding: '14px 16px',
-                            borderRadius: 'var(--radius-sm)',
-                            border: `2px solid ${selected === cat.id ? 'var(--accent)' : 'var(--border)'}`,
-                            background: selected === cat.id ? 'var(--accent-light)' : 'var(--background-card)',
+                            textAlign: 'left',
+                            background: selected === cat.id ? 'rgba(10, 132, 255, 0.15)' : '#1c1c1e',
+                            border: `2px solid ${selected === cat.id ? '#0a84ff' : 'rgba(255,255,255,0.05)'}`,
+                            borderRadius: 16,
+                            padding: '16px 20px',
                             cursor: 'pointer',
-                            transition: 'border-color 0.15s ease, background 0.15s ease',
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4
                         }}
                     >
-                        <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)', marginBottom: 2 }}>
-                            {selected === cat.id ? '● ' : '○ '}{cat.label}
-                        </div>
-                        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{cat.desc}</div>
-                    </div>
+                        <span style={{ fontSize: 17, fontWeight: 600, color: selected === cat.id ? '#0a84ff' : '#fff', letterSpacing: '-0.01em' }}>
+                            {cat.label}
+                        </span>
+                        {cat.desc && (
+                            <span style={{ fontSize: 13, color: selected === cat.id ? 'rgba(255,255,255,0.7)' : '#86868b', lineHeight: 1.4 }}>
+                                {cat.desc}
+                            </span>
+                        )}
+                    </button>
                 ))}
             </div>
 
-            {/* OBC clarification tip */}
-            {(selected === 'OBC_NCL' || selected === 'OBC_CL') && (
-                <div style={{
-                    background: 'var(--info-light)', border: '1px solid rgba(96,165,250,0.2)',
-                    borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 16,
-                    fontSize: 13, color: 'var(--info)',
-                }}>
-                    ℹ For exams that use OBC-NCL vs OBC-CL distinction (like SSC), we will correctly apply
-                    your selection. This is one of the most common mistakes aspirants make.
-                </div>
-            )}
-
             <button
-                className="btn btn-primary btn-full"
                 onClick={() => selected && onNext(selected)}
                 disabled={!selected}
+                style={{
+                    background: !selected ? '#2c2c2e' : '#fff',
+                    color: !selected ? '#86868b' : '#000',
+                    padding: '16px',
+                    borderRadius: 980,
+                    fontSize: 17,
+                    fontWeight: 600,
+                    border: 'none',
+                    cursor: !selected ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.2s, color 0.2s',
+                    width: '100%',
+                    marginTop: 'auto',
+                    flexShrink: 0
+                }}
             >
                 Continue
             </button>

@@ -3,94 +3,133 @@
 import { useState } from 'react'
 
 interface StepDOBProps {
-    initialValue: string
+    initialValue?: string
     onNext: (dob: string) => void
 }
 
-function computeAge(dob: string): number {
-    if (!dob) return 0
-    const today = new Date()
-    const birth = new Date(dob)
-    let age = today.getFullYear() - birth.getFullYear()
-    const m = today.getMonth() - birth.getMonth()
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--
-    return age
-}
+export default function StepDOB({ initialValue = '', onNext }: StepDOBProps) {
+    const [dob, setDob] = useState(initialValue)
+    const [error, setError] = useState('')
 
-function getEligibleCount(age: number): { count: number; examples: string } {
-    if (age < 18) return { count: 0, examples: 'You must be at least 18 to apply for government exams.' }
-    if (age <= 25) return { count: 67, examples: 'SSC CGL, IBPS PO, Railway NTPC, RRB Group D, UPSC CSE, and 62 more.' }
-    if (age <= 30) return { count: 52, examples: 'SSC CGL, IBPS PO, Railway NTPC, SSC CHSL, and 48 more.' }
-    if (age <= 35) return { count: 38, examples: 'UPSC CSE, State PSC, SSC MTS, Teaching exams, and 34 more.' }
-    if (age <= 40) return { count: 24, examples: 'Teaching & PSU exams, some State PSC roles, and 20 more.' }
-    return { count: 8, examples: 'Select State teaching positions and PSU technical roles.' }
-}
+    function handleNext() {
+        if (!dob) {
+            setError('Please select a date.')
+            return
+        }
 
-// Min DOB = 18 years ago, Max DOB = 50 years ago
-const today = new Date()
-const maxDate = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate()).toISOString().split('T')[0]
-const minDate = new Date(today.getFullYear() - 50, today.getMonth(), today.getDate()).toISOString().split('T')[0]
+        const date = new Date(dob)
+        const ageDifMs = Date.now() - date.getTime()
+        const ageDate = new Date(ageDifMs)
+        const age = Math.abs(ageDate.getUTCFullYear() - 1970)
 
-export default function StepDOB({ initialValue, onNext }: StepDOBProps) {
-    const defaultDOB = initialValue || `${today.getFullYear() - 25}-01-01`
-    const [dob, setDob] = useState(defaultDOB)
-    const age = computeAge(dob)
-    const { count, examples } = getEligibleCount(age)
+        if (age < 15 || age > 60) {
+            setError('Age must be between 15 and 60 for most exams.')
+            return
+        }
+
+        setError('')
+        onNext(dob)
+    }
 
     return (
-        <div>
-            <h2 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
-                What&apos;s your date of birth?
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 32 }}>
-                Age limits vary by exam and category. This determines which exams you&apos;re eligible for.
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <h1 style={{ fontSize: 'clamp(32px, 7vw, 40px)', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em', marginBottom: 16, lineHeight: 1.15 }}>
+                When were<br />you born?
+            </h1>
+            <p style={{ color: '#a1a1a6', fontSize: 17, marginBottom: 40, lineHeight: 1.4 }}>
+                We use this to calculate your exact age limits on cutoff dates.
             </p>
 
-            <input
-                className="input"
-                type="date"
-                value={dob}
-                min={minDate}
-                max={maxDate}
-                onChange={e => setDob(e.target.value)}
-                autoFocus
-                style={{ marginBottom: 16, colorScheme: 'dark' }}
-            />
+            <div style={{ position: 'relative' }}>
+                {/* Native date picker styled like an Apple input */}
+                <input
+                    type="date"
+                    value={dob}
+                    onChange={e => { setDob(e.target.value); setError('') }}
+                    onKeyDown={e => e.key === 'Enter' && dob && handleNext()}
+                    style={{
+                        width: '100%',
+                        background: '#1c1c1e',
+                        border: `1px solid ${error ? '#ff3b30' : 'rgba(255,255,255,0.1)'}`,
+                        borderRadius: 16,
+                        padding: '18px 20px',
+                        fontSize: 17,
+                        color: dob ? '#fff' : '#86868b',
+                        fontFamily: "inherit",
+                        outline: 'none',
+                        transition: 'border-color 0.2s',
+                        WebkitAppearance: 'none'
+                    }}
+                    onFocus={e => e.target.style.borderColor = '#0a84ff'}
+                    onBlur={e => e.target.style.borderColor = error ? '#ff3b30' : 'rgba(255,255,255,0.1)'}
+                />
 
-            {/* The Wow Moment — instant feedback */}
-            {dob && age >= 18 && (
-                <div className="wow-card">
-                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
-                        ✓ You are {age} years old — eligible for {count} government exams right now
+                {/* Instant Feedback "Wow" Moment embedded right below */}
+                {dob && !error && (
+                    <div style={{
+                        marginTop: 20,
+                        background: 'rgba(50, 215, 75, 0.15)',
+                        border: '1px solid rgba(50, 215, 75, 0.3)',
+                        borderRadius: 16,
+                        padding: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        animation: 'fadeUp 0.3s ease-out'
+                    }}>
+                        <div style={{
+                            width: 32, height: 32, borderRadius: 10, background: '#32d74b',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                        }}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </div>
+                        <p style={{ fontSize: 14, color: '#32d74b', fontWeight: 500, lineHeight: 1.4 }}>
+                            Perfect. We will dynamically calculate your age as of every exam's cutoff date.
+                        </p>
                     </div>
-                    <div style={{ fontSize: 13, opacity: 0.85 }}>
-                        {examples}
-                    </div>
-                </div>
-            )}
+                )}
 
-            {dob && age < 18 && (
-                <div style={{
-                    background: 'var(--warning-light)', border: '1px solid rgba(245,158,11,0.25)',
-                    borderRadius: 'var(--radius)', padding: 16, marginBottom: 16,
-                    color: 'var(--warning)', fontSize: 14,
-                }}>
-                    ⚠ You must be at least 18 years old to apply for government exams.
-                </div>
-            )}
+                {error && <p style={{ color: '#ff3b30', fontSize: 14, marginTop: 16, fontWeight: 500 }}>{error}</p>}
+            </div>
+
+            {/* Injected CSS for the keyframe */}
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                @keyframes fadeUp {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                /* Removes the native calendar icon in some browsers to keep it clean */
+                input[type="date"]::-webkit-calendar-picker-indicator {
+                    filter: invert(1);
+                    opacity: 0.5;
+                    cursor: pointer;
+                }
+            `}} />
+
+            <div style={{ flex: 1, minHeight: 24 }} />
 
             <button
-                className="btn btn-primary btn-full"
-                onClick={() => onNext(dob)}
-                disabled={!dob || age < 18}
-                style={{ marginTop: 16 }}
+                onClick={handleNext}
+                disabled={!dob}
+                style={{
+                    background: !dob ? '#2c2c2e' : '#fff',
+                    color: !dob ? '#86868b' : '#000',
+                    padding: '16px',
+                    borderRadius: 980,
+                    fontSize: 17,
+                    fontWeight: 600,
+                    border: 'none',
+                    cursor: !dob ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.2s, color 0.2s',
+                    width: '100%',
+                    flexShrink: 0
+                }}
             >
                 Continue
             </button>
-
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 12 }}>
-                Your age is only used for eligibility matching. It&apos;s never shared.
-            </p>
         </div>
     )
 }

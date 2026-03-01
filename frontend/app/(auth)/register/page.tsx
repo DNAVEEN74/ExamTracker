@@ -21,10 +21,17 @@ type QualLevel =
     | 'CLASS_10' | 'CLASS_12' | 'ITI' | 'DIPLOMA'
     | 'GRADUATION' | 'POST_GRADUATION' | 'DOCTORATE'
     | 'PROFESSIONAL_CA' | 'PROFESSIONAL_LLB' | 'PROFESSIONAL_MBBS' | 'PROFESSIONAL_BED'
+
+export interface QualificationEntry {
+    id: string
+    qualification: QualLevel
+    stream: string
+    marks: number | null
+    isFinalYear: boolean
+}
+
 type Gender = 'MALE' | 'FEMALE' | 'THIRD_GENDER' | 'PREFER_NOT_TO_SAY'
-type ExamCat =
-    | 'SSC' | 'RAILWAY' | 'BANKING' | 'UPSC_CIVIL'
-    | 'STATE_PSC' | 'DEFENCE' | 'POLICE' | 'TEACHING' | 'PSU' | 'OTHER'
+type ExamCat = string
 
 interface FormData {
     // Step 0
@@ -33,15 +40,13 @@ interface FormData {
     display_name: string
     // Step 2
     mode: Mode | null
+    min_vacancy: number | null
     // Step 3
     date_of_birth: string
     // Step 4
     category: Category | null
     // Step 5
-    highest_qualification: QualLevel | null
-    qualification_stream: string
-    marks_percentage: number | null
-    is_final_year: boolean
+    qualifications: QualificationEntry[]
     // Step 6
     domicile_state: string | null
     exam_states: string[]
@@ -57,9 +62,8 @@ interface FormData {
 const STORAGE_KEY = 'examtracker_onboarding'
 
 const INITIAL: FormData = {
-    email: '', display_name: '', mode: null, date_of_birth: '',
-    category: null, highest_qualification: null, qualification_stream: '',
-    marks_percentage: null, is_final_year: false,
+    email: '', display_name: '', mode: null, min_vacancy: null, date_of_birth: '',
+    category: null, qualifications: [],
     domicile_state: null, exam_states: [], exam_categories: [],
     gender: null, is_pwd: false, pwd_type: '', is_ex_serviceman: false,
 }
@@ -132,8 +136,8 @@ function RegisterForm() {
     // Don't render until hydrated (prevents localStorage flash)
     if (!hydrated) {
         return (
-            <div style={{ minHeight: '100vh', background: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', opacity: 0.5 }} />
+            <div style={{ minHeight: '100dvh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#0a84ff', opacity: 0.5 }} />
             </div>
         )
     }
@@ -166,7 +170,7 @@ function RegisterForm() {
                 <StepMode
                     initialValue={data.mode}
                     name={data.display_name || 'there'}
-                    onNext={mode => goNext({ mode })}
+                    onNext={({ mode, minVacancy }) => goNext({ mode, min_vacancy: minVacancy })}
                 />
             </OnboardingLayout>
         )
@@ -201,16 +205,8 @@ function RegisterForm() {
         return (
             <OnboardingLayout step={5} onBack={goBack}>
                 <StepQualification
-                    initialQual={data.highest_qualification}
-                    initialStream={data.qualification_stream}
-                    initialMarks={data.marks_percentage}
-                    initialFinalYear={data.is_final_year}
-                    onNext={q => goNext({
-                        highest_qualification: q.qualification,
-                        qualification_stream: q.stream,
-                        marks_percentage: q.marks,
-                        is_final_year: q.isFinalYear,
-                    })}
+                    initialValues={data.qualifications}
+                    onNext={quals => goNext({ qualifications: quals })}
                 />
             </OnboardingLayout>
         )
@@ -234,6 +230,7 @@ function RegisterForm() {
         return (
             <OnboardingLayout step={7} onBack={goBack}>
                 <StepExamCategories
+                    mode={data.mode}
                     initialValue={data.exam_categories as ExamCat[]}
                     onNext={cats => goNext({ exam_categories: cats })}
                 />
@@ -275,7 +272,7 @@ function RegisterForm() {
 // ── Component ──────────────────────────────────────────────────────────
 export default function RegisterPage() {
     return (
-        <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--background)' }} />}>
+        <Suspense fallback={<div style={{ minHeight: '100dvh', background: '#000' }} />}>
             <RegisterForm />
         </Suspense>
     )

@@ -3,143 +3,123 @@
 import { useState } from 'react'
 
 const STATES = [
-    { code: 'IN-AP', name: 'Andhra Pradesh' },
-    { code: 'IN-AR', name: 'Arunachal Pradesh' },
-    { code: 'IN-AS', name: 'Assam' },
-    { code: 'IN-BR', name: 'Bihar' },
-    { code: 'IN-CT', name: 'Chhattisgarh' },
-    { code: 'IN-GA', name: 'Goa' },
-    { code: 'IN-GJ', name: 'Gujarat' },
-    { code: 'IN-HR', name: 'Haryana' },
-    { code: 'IN-HP', name: 'Himachal Pradesh' },
-    { code: 'IN-JH', name: 'Jharkhand' },
-    { code: 'IN-KA', name: 'Karnataka' },
-    { code: 'IN-KL', name: 'Kerala' },
-    { code: 'IN-MP', name: 'Madhya Pradesh' },
-    { code: 'IN-MH', name: 'Maharashtra' },
-    { code: 'IN-MN', name: 'Manipur' },
-    { code: 'IN-ML', name: 'Meghalaya' },
-    { code: 'IN-MZ', name: 'Mizoram' },
-    { code: 'IN-NL', name: 'Nagaland' },
-    { code: 'IN-OD', name: 'Odisha' },
-    { code: 'IN-PB', name: 'Punjab' },
-    { code: 'IN-RJ', name: 'Rajasthan' },
-    { code: 'IN-SK', name: 'Sikkim' },
-    { code: 'IN-TN', name: 'Tamil Nadu' },
-    { code: 'IN-TS', name: 'Telangana' },
-    { code: 'IN-TR', name: 'Tripura' },
-    { code: 'IN-UP', name: 'Uttar Pradesh' },
-    { code: 'IN-UK', name: 'Uttarakhand' },
-    { code: 'IN-WB', name: 'West Bengal' },
-    { code: 'IN-AN', name: 'Andaman & Nicobar Islands' },
-    { code: 'IN-CH', name: 'Chandigarh' },
-    { code: 'IN-DL', name: 'Delhi' },
-    { code: 'IN-JK', name: 'Jammu & Kashmir' },
-    { code: 'IN-LA', name: 'Ladakh' },
-    { code: 'IN-PY', name: 'Puducherry' },
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+    'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
+    'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
+    'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
+    'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    'Delhi', 'Jammu and Kashmir', 'Other UTs'
 ]
 
 interface StepStateProps {
-    initialDomicile: string | null
-    initialExamStates: string[]
+    initialDomicile?: string | null
+    initialExamStates?: string[]
     onNext: (data: { domicile: string; examStates: string[] }) => void
 }
 
 export default function StepState({ initialDomicile, initialExamStates, onNext }: StepStateProps) {
-    const [domicile, setDomicile] = useState(initialDomicile ?? '')
-    const [examStates, setExamStates] = useState<string[]>(initialExamStates)
-    const [applyNationally, setApplyNationally] = useState(initialExamStates.length === 0)
+    const [domicile, setDomicile] = useState(initialDomicile || '')
+    // Defaulting to empty array. We can make multi-state selection later, 
+    // but for streamlined Apple UX, we'll auto-check that their domicile state is tracked.
+    const [examStates, setExamStates] = useState<string[]>(initialExamStates || [])
+    const [error, setError] = useState('')
 
-    function toggleExamState(code: string) {
-        setExamStates(prev =>
-            prev.includes(code) ? prev.filter(s => s !== code) : [...prev, code]
-        )
-    }
+    function handleNext() {
+        if (!domicile) {
+            setError('Please select your home state.')
+            return
+        }
 
-    function handleSubmit() {
-        if (!domicile) return
-        onNext({ domicile, examStates: applyNationally ? [] : examStates })
+        // Auto-select domicile state for exam tracking if they haven't explicitly chosen others
+        const finalExamStates = examStates.length > 0 ? examStates : [domicile]
+
+        setError('')
+        onNext({ domicile, examStates: finalExamStates })
     }
 
     return (
-        <div>
-            <h2 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
-                Which state are you from?
-            </h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 28 }}>
-                Domicile state is used for state-quota reservations and domicile-specific exams.
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <h1 style={{ fontSize: 'clamp(32px, 7vw, 40px)', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em', marginBottom: 16, lineHeight: 1.15 }}>
+                Where are<br />you from?
+            </h1>
+            <p style={{ color: '#a1a1a6', fontSize: 17, marginBottom: 32, lineHeight: 1.4 }}>
+                Many state PSC exams heavily prefer local students (Domicile reservations).
             </p>
 
-            {/* Domicile state */}
-            <p className="section-label" style={{ marginBottom: 8 }}>Home / Domicile State</p>
-            <select
-                className="input"
-                value={domicile}
-                onChange={e => setDomicile(e.target.value)}
-                style={{ marginBottom: 24 }}
-            >
-                <option value="" disabled>Select your domicile state</option>
-                {STATES.map(s => (
-                    <option key={s.code} value={s.code}>{s.name}</option>
-                ))}
-            </select>
-
-            {/* Exam states */}
-            <p className="section-label" style={{ marginBottom: 8 }}>Which states do you want to apply in?</p>
-
-            <label style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '14px 16px', marginBottom: 12,
-                background: applyNationally ? 'var(--accent-light)' : 'var(--background-card)',
-                borderRadius: 'var(--radius-sm)',
-                border: `2px solid ${applyNationally ? 'var(--accent)' : 'var(--border)'}`,
-                cursor: 'pointer',
-            }}>
-                <input
-                    type="checkbox"
-                    checked={applyNationally}
-                    onChange={e => { setApplyNationally(e.target.checked); if (e.target.checked) setExamStates([]) }}
-                    style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }}
-                />
-                <div>
-                    <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-                        All India (Central government exams)
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                        SSC, UPSC, IBPS, Railway — no state restriction
-                    </div>
-                </div>
-            </label>
-
-            {!applyNationally && (
-                <div style={{
-                    background: 'var(--background-card)', borderRadius: 'var(--radius)',
-                    border: '1px solid var(--border)', padding: '16px', marginBottom: 16,
-                    maxHeight: 240, overflowY: 'auto',
-                }}>
-                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                        Select states you wish to apply for state-level exams:
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ flex: 1, paddingBottom: 24, overflowY: 'auto' }}>
+                <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#86868b', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Home State (Domicile)
+                </label>
+                <div style={{ position: 'relative' }}>
+                    <select
+                        value={domicile}
+                        onChange={(e) => {
+                            setDomicile(e.target.value)
+                            setError('')
+                        }}
+                        style={{
+                            width: '100%', background: '#1c1c1e', border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: 16, padding: '18px 20px', fontSize: 17, color: domicile ? '#fff' : '#86868b',
+                            outline: 'none', transition: 'border-color 0.2s', WebkitAppearance: 'none', cursor: 'pointer'
+                        }}
+                    >
+                        <option value="" disabled>Select your state...</option>
                         {STATES.map(s => (
-                            <label key={s.code} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                                <input
-                                    type="checkbox"
-                                    checked={examStates.includes(s.code)}
-                                    onChange={() => toggleExamState(s.code)}
-                                    style={{ accentColor: 'var(--accent)' }}
-                                />
-                                <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{s.name}</span>
-                            </label>
+                            <option key={s} value={s}>{s}</option>
                         ))}
+                    </select>
+                    {/* Native dropdown chevron */}
+                    <div style={{ position: 'absolute', right: 20, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#86868b' }}>
+                        ▼
                     </div>
                 </div>
-            )}
+
+                {domicile && !error && (
+                    <div style={{
+                        marginTop: 24,
+                        background: 'rgba(10, 132, 255, 0.1)',
+                        border: '1px solid rgba(10, 132, 255, 0.2)',
+                        borderRadius: 16,
+                        padding: '16px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 12,
+                        animation: 'fadeUp 0.3s ease-out'
+                    }}>
+                        <div style={{ marginTop: 2 }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0a84ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                            </svg>
+                        </div>
+                        <p style={{ fontSize: 14, color: '#e5e5ea', lineHeight: 1.5 }}>
+                            We've automatically subscribed you to Central Government exams (SSC, UPSC, etc) and State exams for <strong style={{ color: '#fff' }}>{domicile}</strong>.
+                        </p>
+                    </div>
+                )}
+
+                {error && <p style={{ color: '#ff3b30', fontSize: 14, marginTop: 16, fontWeight: 500 }}>{error}</p>}
+            </div>
+
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                @keyframes fadeUp {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+            `}} />
 
             <button
-                className="btn btn-primary btn-full"
-                onClick={handleSubmit}
-                disabled={!domicile || (!applyNationally && examStates.length === 0)}
+                onClick={handleNext}
+                disabled={!domicile}
+                style={{
+                    background: !domicile ? '#2c2c2e' : '#fff',
+                    color: !domicile ? '#86868b' : '#000',
+                    padding: '16px', borderRadius: 980, fontSize: 17, fontWeight: 600,
+                    border: 'none', cursor: !domicile ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.2s, color 0.2s', width: '100%', marginTop: 'auto', flexShrink: 0
+                }}
             >
                 Continue
             </button>

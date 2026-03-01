@@ -61,11 +61,11 @@ export async function releaseLock(name: string, holder = 'default'): Promise<voi
 
 /**
  * Idempotency check — prevents webhook replay attacks.
- * Returns true if already processed (skip). Marks as processed with 24h TTL.
+ * Returns true if already processed (skip). Marks as processed with 30-day TTL.
  */
 export async function checkAndMarkIdempotent(eventId: string): Promise<boolean> {
     if (!redis) return false
     const key = `idempotent:${eventId}`
-    const result = await redis.set(key, '1', { nx: true, ex: 86400 })
+    const result = await redis.set(key, '1', { nx: true, ex: 2592000 }) // 30 days
     return result === null
 }

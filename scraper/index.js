@@ -51,10 +51,18 @@ if (missingEnv.length > 0) {
 
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
+// Wrap every Supabase HTTP call with a 15-second timeout.
+// Without this, a degraded Supabase can cause the scraper to hang indefinitely.
+function supabaseFetchWithTimeout(url, options) {
+    const controller = new AbortController()
+    const id = setTimeout(() => controller.abort(), 15_000)
+    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(id))
+}
+
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { persistSession: false } }
+    { auth: { persistSession: false }, global: { fetch: supabaseFetchWithTimeout } }
 )
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -177,7 +185,7 @@ async function notifyMainApp(payload) {
                 'Content-Type': 'application/json',
                 'x-scraper-secret': CONFIG.webhookSecret,
             },
-            timeout: 60_000,   // AI parsing can take up to 30s — give it time
+            timeout: 55_000,   // 5s buffer before Vercel's 60s maxDuration hard-cuts the connection
         })
         return res.data
     } catch (err) {
@@ -217,9 +225,20 @@ class PageFetcher {
         return { html: response.data, httpStatus: response.status }
     }
 
+    async ensureBrowser() {
+        if (!this.browser?.isConnected()) {
+            logger.warn('Playwright browser disconnected — restarting')
+            try { await this.browser?.close() } catch { }
+            this.browser = await chromium.launch({ headless: true })
+            logger.info('Playwright browser restarted')
+        }
+    }
+
     async fetchDynamic(url) {
-        const page = await this.browser.newPage()
-        await page.setExtraHTTPHeaders({ 'User-Agent': CONFIG.userAgent })
+        await this.ensureBrowser()
+        // Each site gets its own context — prevents cookies/storage leaking between sites
+        const context = await this.browser.newContext({ userAgent: CONFIG.userAgent })
+        const page = await context.newPage()
         try {
             // Use 'domcontentloaded' instead of 'networkidle' to avoid hanging on
             // government portals that have infinite polling/keep-alive connections.
@@ -227,32 +246,38 @@ class PageFetcher {
                 waitUntil: 'domcontentloaded',
                 timeout: CONFIG.timeoutMs,
             })
-            // Wait for lazy-loaded notification sections to render
-            await page.waitForTimeout(3000)
-            // Attempt to also wait for any table/list elements to appear
-            await page.waitForSelector('table, ul, .notification, .notice, #main-content', {
-                timeout: 5000
-            }).catch(() => { /* selector not found — proceed anyway */ })
+            // Event-based wait: resolve as soon as notification content appears, or 3s max.
+            // Avoids the brittle waitForTimeout(3000) anti-pattern.
+            await page.waitForSelector(
+                'table, ul, .notification, .notice, #main-content, a[href$=".pdf"]',
+                { timeout: 3000, state: 'attached' }
+            ).catch(() => {})
             return { html: await page.content(), httpStatus: response?.status() ?? 200 }
         } finally {
-            await page.close()
+            await context.close()
         }
     }
 
     async fetch(site) {
         await sleep(CONFIG.requestDelayMs)
-        try {
-            return site.scrape_method === 'js_render'
-                ? await this.fetchDynamic(site.notification_page)
-                : await this.fetchStatic(site.notification_page)
-        } catch (err) {
-            const httpStatus = err.response?.status ?? null
-            const status = httpStatus === 403 || httpStatus === 429
-                ? 'BLOCKED'
-                : err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED'
-                    ? 'TIMEOUT'
-                    : 'ERROR'
-            return { html: null, httpStatus, errorStatus: status, errorMsg: err.message }
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                return site.scrape_method === 'js_render'
+                    ? await this.fetchDynamic(site.notification_page)
+                    : await this.fetchStatic(site.notification_page)
+            } catch (err) {
+                const httpStatus = err.response?.status ?? null
+                // Never retry deliberate server blocks — they won't clear on retry
+                if (httpStatus === 403 || httpStatus === 429) {
+                    return { html: null, httpStatus, errorStatus: 'BLOCKED', errorMsg: err.message }
+                }
+                if (attempt === 3) {
+                    const status = err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED' ? 'TIMEOUT' : 'ERROR'
+                    return { html: null, httpStatus, errorStatus: status, errorMsg: err.message }
+                }
+                logger.warn({ url: site.notification_page, attempt, err: err.message }, 'Page fetch failed — retrying')
+                await sleep(2000 * attempt)  // 2s, 4s backoff
+            }
         }
     }
 }
@@ -358,13 +383,12 @@ async function fetchRssLinks(rssUrl) {
         const items = []
         $('item').each((_, el) => {
             const url = $(el).find('link').text().trim() || $(el).find('guid').text().trim()
-            if (url && url.toLowerCase().includes('.pdf')) {
-                items.push({
-                    url,
-                    link_text: $(el).find('title').text().trim().slice(0, 500),
-                    context: $(el).find('description').text().trim().slice(0, 1000),
-                })
-            }
+            if (!url) return
+            items.push({
+                url,
+                link_text: $(el).find('title').text().trim().slice(0, 500),
+                context: $(el).find('description').text().trim().slice(0, 1000),
+            })
         })
         return items
     } catch (err) {
@@ -385,6 +409,7 @@ async function processPdfLink(link, site) {
                 responseType: 'arraybuffer',
                 headers: { 'User-Agent': CONFIG.userAgent },
                 timeout: CONFIG.timeoutMs,
+                maxContentLength: 50 * 1024 * 1024,  // 50MB — webhook rejects >40MB anyway
             })
             pdfBuffer = Buffer.from(res.data)
             break
@@ -471,9 +496,9 @@ async function processSite(site, fetcher) {
 
     // RSS shortcut — structured, reliable, no HTML scraping needed
     if (site.has_rss && site.rss_url) {
-        const rssLinks = await fetchRssLinks(site.rss_url)
+        const rssItems = await fetchRssLinks(site.rss_url)
         const rssHash = crypto.createHash('md5')
-            .update(rssLinks.map(l => l.url).join('|'))
+            .update(rssItems.map(l => l.url).join('|'))
             .digest('hex')
 
         const lastHash = await getLastContentHash(`${site.id}_rss`)
@@ -482,7 +507,25 @@ async function processSite(site, fetcher) {
             return { siteId: site.id, status: 'NO_CHANGE' }
         }
 
-        const processed = (await Promise.all(rssLinks.map(l => processPdfLink(l, site)))).filter(Boolean)
+        // Split: direct PDF links vs HTML notification pages that may contain PDFs.
+        // Previously only .pdf URLs were followed — this missed most RSS feeds that
+        // link to notification pages rather than PDFs directly.
+        const directPdfLinks = rssItems.filter(i => i.url.toLowerCase().includes('.pdf'))
+        const notifPageLinks = rssItems.filter(i => !i.url.toLowerCase().includes('.pdf'))
+
+        const htmlPdfLinks = []
+        for (const item of notifPageLinks) {
+            try {
+                const { html } = await fetcher.fetchStatic(item.url)
+                if (html) htmlPdfLinks.push(...extractPdfLinks(html, item.url))
+            } catch (err) {
+                logger.warn({ url: item.url, err: err.message }, 'RSS-linked notification page fetch failed')
+            }
+        }
+
+        const allLinks = [...directPdfLinks, ...htmlPdfLinks]
+        const pdfLimit = pLimit(3)
+        const processed = (await Promise.all(allLinks.map(l => pdfLimit(() => processPdfLink(l, site))))).filter(Boolean)
         await writeScraperLog({ site_id: site.id, status: 'OK', content_hash: rssHash, duration_ms: Date.now() - startMs, new_pdfs_found: processed.length })
         return { siteId: site.id, status: 'OK', newPdfs: processed.length }
     }
@@ -508,11 +551,10 @@ async function processSite(site, fetcher) {
     logger.info({ site: site.id }, '🔔 Change detected')
 
     const pdfLinks = extractPdfLinks(html, site.notification_page)
-    const processed = []
-    for (const link of pdfLinks) {
-        const result = await processPdfLink(link, site)
-        if (result) processed.push(result)
-    }
+    const pdfLimit = pLimit(3)
+    const processed = (await Promise.all(
+        pdfLinks.map(link => pdfLimit(() => processPdfLink(link, site)))
+    )).filter(Boolean)
 
     await writeScraperLog({ site_id: site.id, status: 'OK', content_hash: newHash, http_status: httpStatus, duration_ms: Date.now() - startMs, new_pdfs_found: processed.length })
     return { siteId: site.id, status: 'OK', newPdfs: processed.length }
@@ -545,12 +587,15 @@ async function main() {
     const needsPlaywright = allSites.some(s => s.scrape_method === 'js_render')
     if (needsPlaywright) await fetcher.init()
 
-    const limit = pLimit(CONFIG.concurrency)
-    const results = await Promise.all(
-        allSites.map(site => limit(() => processSite(site, fetcher)))
-    )
-
-    await fetcher.close()
+    let results
+    try {
+        const limit = pLimit(CONFIG.concurrency)
+        results = await Promise.all(
+            allSites.map(site => limit(() => processSite(site, fetcher)))
+        )
+    } finally {
+        await fetcher.close()
+    }
 
     const summary = {
         total: results.length,
@@ -563,7 +608,7 @@ async function main() {
     logger.info(summary, 'Run complete')
 
     const p0Ids = allSites.filter(s => s.priority === 'P0').map(s => s.id)
-    const p0Failed = results.filter(r => p0Ids.includes(r.siteId) && r.status === 'ERROR').length
+    const p0Failed = results.filter(r => p0Ids.includes(r.siteId) && ['ERROR', 'BLOCKED', 'TIMEOUT'].includes(r.status)).length
     if (p0Failed > 0) {
         logger.error({ p0Failed }, `${p0Failed} P0 site(s) failed`)
         process.exit(1)

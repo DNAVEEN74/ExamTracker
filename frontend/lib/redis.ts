@@ -64,7 +64,12 @@ export async function releaseLock(name: string, holder = 'default'): Promise<voi
  * Returns true if already processed (skip). Marks as processed with 30-day TTL.
  */
 export async function checkAndMarkIdempotent(eventId: string): Promise<boolean> {
-    if (!redis) return false
+    if (!redis) {
+        // Without Redis, duplicate webhook deliveries (e.g. overlapping cron runs) are not
+        // caught here. The DB unique constraint on slug is the fallback dedup layer.
+        console.warn('[redis] UPSTASH_REDIS_REST_URL not configured — idempotency bypassed, relying on DB-level dedup only')
+        return false
+    }
     const key = `idempotent:${eventId}`
     const result = await redis.set(key, '1', { nx: true, ex: 2592000 }) // 30 days
     return result === null

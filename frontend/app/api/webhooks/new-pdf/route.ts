@@ -269,6 +269,12 @@ export async function POST(request: NextRequest) {
                 const { error: rollbackErr } = await supabaseAdmin.from('exam_notifications').delete().eq('id', notificationId)
                 if (rollbackErr) console.error(`[new-pdf] Rollback also failed for ${notificationId}:`, rollbackErr.message)
                 else console.warn(`[new-pdf] ⚠️ Rolled back orphaned notification ${notificationId}`)
+                // CRITICAL: Also remove the pdf_hashes row so the scraper can re-download and
+                // retry this PDF on the next run. Without this, the hash stays forever and the
+                // notification is permanently lost — the scraper will never touch it again.
+                const { error: hashDeleteErr } = await supabaseAdmin.from('pdf_hashes').delete().eq('hash', pdf_hash)
+                if (hashDeleteErr) console.error(`[new-pdf] ❌ Failed to remove pdf_hash — notification permanently lost:`, hashDeleteErr.message)
+                else console.warn(`[new-pdf] 🔁 Removed pdf_hash ${pdf_hash.slice(0, 12)} — scraper will retry on next run`)
                 throw new Error(`Posts insert failed (parent rolled back): ${postsErr.message}`)
             } else {
                 console.log(`[new-pdf] ✅ ${postsToInsert.length} posts saved for ${notificationId}`)
@@ -298,11 +304,12 @@ export async function POST(request: NextRequest) {
     const deleted = await deletePdfFromStorage(storage_path)
     console.log(`[new-pdf] Storage cleanup: ${deleted ? '✅ deleted' : '⚠️ delete failed (non-fatal)'}`)
 
-    // ── 8. Trigger eligibility matching (Note: queue_new_exam_notification needs updating to handle notification IDs)
+    // ── 8. Trigger eligibility matching
     if (notificationId && parsed.extraction_confidence !== 'LOW') {
-        const { error } = await supabaseAdmin.rpc('queue_new_exam_notification', { p_exam_id: notificationId })
+        const { error } = await supabaseAdmin.rpc('queue_new_exam_notification', { p_notification_id: notificationId })
         if (error) {
-            console.warn('[new-pdf] Eligibility queue RPC failed (non-fatal):', error.message)
+            // Log as error (not warn) — users will not receive match notifications until this is fixed
+            console.error('[new-pdf] ❌ Eligibility queue RPC failed — users will not be notified of this exam:', error.message)
         } else {
             console.log(`[new-pdf] 📣 Eligibility matching queued for notification ${notificationId}`)
         }

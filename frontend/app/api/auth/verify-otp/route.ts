@@ -1,9 +1,13 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase/admin'
 import { applyAuthRateLimit } from '@/lib/rateLimit'
 import { verifyOtpSchema } from '@/lib/validators/auth.validator'
 import * as userService from '@/lib/services/user.service'
 import * as notificationService from '@/lib/services/notification.service'
+import db from '@/lib/db'
+import { signJWT } from '@/lib/jwt'
+import crypto from 'crypto'
+
 
 /** POST /api/auth/verify-otp */
 export async function POST(request: NextRequest) {
@@ -21,38 +25,67 @@ export async function POST(request: NextRequest) {
         }
         const { email, token } = parsed.data
 
-        const { data, error } = await supabaseAdmin.auth.verifyOtp({
-            email,
-            token,
-            type: 'email',
+        // 1. Validate OTP from Postgres safely avoiding race conditions
+        const otpRecord = await db.otp.findFirst({
+            where: { email, code: token, used: false, expires_at: { gt: new Date() } },
+            orderBy: { created_at: 'desc' }
         })
 
-        if (error || !data.session) {
+        if (!otpRecord) {
             return NextResponse.json(
                 { success: false, error: 'Invalid or expired OTP' },
                 { status: 401 }
             )
         }
 
-        const supabaseUser = data.user!
-        const isNewUser = !(await userService.userExists(supabaseUser.id))
+        // Immediately burn the OTP
+        await db.otp.update({
+            where: { id: otpRecord.id },
+            data: { used: true }
+        })
+
+        // 2. Resolve User
+        let userAuthId
+        const isNewUser = !(await db.user.findUnique({ where: { email } }))
 
         if (isNewUser) {
-            await userService.createUser({ id: supabaseUser.id, email })
-            await notificationService.createDefaultPreferences(supabaseUser.id)
+            // Generate a secure UUID for the user
+            userAuthId = crypto.randomUUID()
+            await userService.createUser({ id: userAuthId, email })
+            await notificationService.createDefaultPreferences(userAuthId)
+        } else {
+            const existingUser = await db.user.findUnique({ where: { email } })
+            userAuthId = existingUser!.id
         }
 
-        return NextResponse.json({
+        // 3. Generate internal JWT using our new Edge-compatible token mechanism
+        const jwtStr = await signJWT({ id: userAuthId, email })
+
+        // 4. Attach properly structured cookie matching standard HTTP-only practices
+        const response = NextResponse.json({
             success: true,
             data: {
-                session: {
-                    access_token: data.session.access_token,
-                    refresh_token: data.session.refresh_token,
-                    expires_at: data.session.expires_at,
-                },
                 is_new_user: isNewUser,
+                // Client no longer needs internal session details if we rely on cookies, but just in case:
+                session: {
+                    access_token: jwtStr,
+                    expires_at: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60)
+                }
             },
         })
+
+        response.cookies.set({
+            name: 'auth-token',
+            value: jwtStr,
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 30 * 24 * 60 * 60, // 30 days
+            path: '/',
+        })
+
+        return response
+
     } catch (err) {
         console.error('verify-otp error:', err)
         return NextResponse.json({ success: false, error: 'Failed to verify OTP' }, { status: 500 })

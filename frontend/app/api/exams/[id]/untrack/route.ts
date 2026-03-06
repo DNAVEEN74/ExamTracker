@@ -3,6 +3,9 @@ import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
 
+
+export const dynamic = 'force-dynamic'
+
 /** DELETE /api/exams/[id]/untrack */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { user, errorResponse } = await requireAuth(request)

@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
@@ -5,7 +6,8 @@ import * as eligibilityService from '@/lib/services/eligibility.service'
 import * as examService from '@/lib/services/exam.service'
 import * as userService from '@/lib/services/user.service'
 
-/** GET /api/dashboard — Personalized dashboard data */
+
+/** GET /api/dashboard â€” Personalized dashboard data */
 export async function GET(request: NextRequest) {
     const { user, errorResponse } = await requireAuth(request)
     if (errorResponse) return errorResponse

@@ -1,7 +1,9 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireAdminRole } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import db from '@/lib/db'
+
 
 /** GET /api/admin/health/scrapers */
 export async function GET(request: NextRequest) {
@@ -14,16 +16,11 @@ export async function GET(request: NextRequest) {
     if (rl) return rl
 
     try {
-        const { data, error } = await supabaseAdmin
-            .from('scraper_log')
-            .select('source_id, status, queued_at, pdf_url')
-            .order('queued_at', { ascending: false })
-            .limit(50)
-
-        if (error && error.code === '42P01') {
-            return NextResponse.json({ success: true, data: [] })
-        }
-        if (error) throw new Error(error.message)
+        const data = await db.scraperLog.findMany({
+            select: { site_id: true, status: true, scraped_at: true },
+            orderBy: { scraped_at: 'desc' },
+            take: 50
+        })
 
         return NextResponse.json({ success: true, data: data ?? [] })
     } catch (err) {

@@ -1,9 +1,11 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import { updateProfileSchema } from '@/lib/validators/onboarding.validator'
 import * as userService from '@/lib/services/user.service'
 import * as eligibilityService from '@/lib/services/eligibility.service'
+
 
 /** GET /api/profile */
 export async function GET(request: NextRequest) {

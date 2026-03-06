@@ -3,6 +3,9 @@ import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
 
+
+export const dynamic = 'force-dynamic'
+
 /** GET /api/exams/search?q= */
 export async function GET(request: NextRequest) {
     const { user, errorResponse } = await requireAuth(request)

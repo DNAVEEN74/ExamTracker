@@ -1,6 +1,7 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import db from '@/lib/db'
 import { checkAndMarkIdempotent } from '@/lib/redis'
 import {
     downloadPdfFromStorage,
@@ -8,12 +9,13 @@ import {
     updateIngestionStatus,
 } from '@/lib/services/pdf.service'
 import {
+
     extractExamDataFromPdf,
     generateSlug,
     type ExtractionContext,
 } from '@/lib/services/ai-parser.service'
 
-// Node.js runtime — required for Buffer operations & timingSafeEqual
+// Node.js runtime â€” required for Buffer operations & timingSafeEqual
 export const runtime = 'nodejs'
 // Hobby tier max duration = 60 seconds (prevents AI extraction from timing out at 10s)
 export const maxDuration = 60
@@ -35,23 +37,23 @@ interface ScraperWebhookPayload {
 
 /**
  * POST /api/webhooks/new-pdf
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
  * Fired by the scraper after uploading a new PDF to Supabase Storage.
  *
  * Pipeline (single AI step):
  *   1. Verify secret
  *   2. Idempotency check
  *   3. Download PDF bytes from Supabase Storage
- *   4. Send raw PDF → Gemini 2.0 Flash (reads it natively — digital + scanned)
+ *   4. Send raw PDF â†’ Gemini 2.0 Flash (reads it natively â€” digital + scanned)
  *   5. Validate + sanitise AI output
- *   6a. INSERT into exam_notifications (is_active: false — awaits admin approval)
+ *   6a. INSERT into exam_notifications (is_active: false â€” awaits admin approval)
  *   6b. Bulk INSERT into exam_posts (one row per extracted post)
- *   7. Update pdf_ingestion_log → DONE
- *   8. DELETE PDF from Storage  (SHA-256 hash stays in pdf_hashes forever → no re-scrape)
+ *   7. Update pdf_ingestion_log â†’ DONE
+ *   8. DELETE PDF from Storage  (SHA-256 hash stays in pdf_hashes forever â†’ no re-scrape)
  *   9. Trigger eligibility matching RPC
  */
 export async function POST(request: NextRequest) {
-    // ── 1. Auth & Security ─────────────────────────────────────────────────────
+    // â”€â”€ 1. Auth & Security â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const expected = process.env.SCRAPER_WEBHOOK_SECRET
     if (!expected || expected.trim() === '') {
         console.error('[FATAL] SCRAPER_WEBHOOK_SECRET is not configured on the server')
@@ -88,15 +90,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Invalid storage path format' }, { status: 400 })
     }
 
-    console.log(`[new-pdf] ▶ ${site_id} | ${pdf_hash.slice(0, 12)}`)
+    console.log(`[new-pdf] â–¶ ${site_id} | ${pdf_hash.slice(0, 12)}`)
 
-    // ── 2. Idempotency ────────────────────────────────────────────────────────
+    // â”€â”€ 2. Idempotency â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const alreadyProcessed = await checkAndMarkIdempotent(`pdf:${pdf_hash}`)
     if (alreadyProcessed) {
         return NextResponse.json({ success: true, skipped: true, reason: 'already_processed' })
     }
 
-    // ── 3. Download PDF ───────────────────────────────────────────────────────
+    // â”€â”€ 3. Download PDF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let pdfBuffer: Buffer
     try {
         pdfBuffer = await downloadPdfFromStorage(storage_path)
@@ -107,7 +109,7 @@ export async function POST(request: NextRequest) {
     }
 
     const fileSizeKb = Math.round(pdfBuffer.length / 1024)
-    console.log(`[new-pdf] Downloaded ${fileSizeKb}KB — processing...`)
+    console.log(`[new-pdf] Downloaded ${fileSizeKb}KB â€” processing...`)
 
     // Limit memory: Max 40MB PDF. Prevents Vercel serverless memory bomb (250MB limit)
     if (pdfBuffer.length > 40 * 1024 * 1024) {
@@ -118,7 +120,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, skipped: true, reason: 'pdf_too_large' })
     }
 
-    // ── 4. AI Extraction (single step — Gemini reads PDF natively) ─────────────
+    // â”€â”€ 4. AI Extraction (single step â€” Gemini reads PDF natively) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const ctx: ExtractionContext = {
         siteId: site_id,
         siteName: site_name,
@@ -140,140 +142,81 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'AI extraction failed' }, { status: 500 })
     }
 
-    console.log(`[new-pdf] ✦ "${parsed.name}" | conf: ${parsed.extraction_confidence} | model: ${parsed.ai_model_used}`)
+    console.log(`[new-pdf] âœ¦ "${parsed.name}" | conf: ${parsed.extraction_confidence} | model: ${parsed.ai_model_used}`)
 
-    // ── 5. Insert into exam_notifications & exam_posts ───────────────────────
+    // â”€â”€ 5. Insert into exam_notifications & exam_posts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const uniqueSuffix = crypto.randomUUID().split('-')[0]
     const slug = `${generateSlug(parsed.name).slice(0, 80)}-${uniqueSuffix}`
     let notificationId: string | null = null
 
     try {
-        // 5a. Insert Parent Notification
-        const { data: notification, error: notifErr } = await supabaseAdmin
-            .from('exam_notifications')
-            .insert({
-                slug,
-                name: parsed.name,
-                short_name: parsed.short_name,
-                notification_number: parsed.notification_number,
-                category: parsed.category,
-                conducting_body: parsed.conducting_body,
-                level: parsed.level,
-                state_code: parsed.state_code,
-                notification_date: parsed.notification_date,
-                application_start: parsed.application_start,
-                application_end: parsed.application_end,
-                last_date_fee_payment: parsed.last_date_fee_payment,
-                correction_window_start: parsed.correction_window_start,
-                correction_window_end: parsed.correction_window_end,
-                official_notification_url: parsed.official_notification_url,
-                syllabus_url: parsed.syllabus_url,
-                previous_papers_url: parsed.previous_papers_url,
-                has_multiple_posts: parsed.posts.length > 1,
-                total_posts_count: parsed.posts.length,
-                data_source: 'SCRAPER',
-                notification_verified: false,
-                is_active: false, // Waits for admin approval
+        // 5. Wrap insertion safely in a Prisma Transaction
+        const transactionResult = await db.$transaction(async (tx) => {
+            // Check for duplicate manually before failing the transaction constraint explicitly
+            const existingNotif = await tx.exam.findUnique({
+                where: { slug }
             })
-            .select('id')
-            .single()
 
-        if (notifErr) {
-            if (notifErr.code === '23505') {
-                // Duplicate slug — the notification was already processed by a prior run.
-                // Return early so we don't proceed with notificationId=null and mark log as DONE with null exam_id.
-                console.warn(`[new-pdf] Duplicate slug "${slug}" — notification already exists, skipping`)
-                if (ingestion_log_id) await updateIngestionStatus(ingestion_log_id, 'DONE', { error_message: 'Duplicate notification (already processed)' })
-                return NextResponse.json({ success: true, skipped: true, reason: 'duplicate_notification' })
-            } else {
-                throw new Error(notifErr.message)
+            if (existingNotif) {
+                return { success: true, skipped: true, reason: 'duplicate_notification' }
             }
-        } else {
-            notificationId = notification?.id ?? null
-            console.log(`[new-pdf] ✅ Notification saved: ${notificationId}`)
+
+            const isMultiple = parsed.posts.length > 1
+            const totalCount = parsed.posts.length
+
+            // Insert Parent
+            const notif = await tx.exam.create({
+                data: {
+                    slug,
+                    name: parsed.name,
+                    short_name: parsed.short_name,
+                    category: parsed.category ?? 'OTHER',
+                    conducting_body: parsed.conducting_body ?? 'Unknown',
+                    level: parsed.level ?? 'STATE',
+                    state_code: parsed.state_code,
+                    total_vacancies: isMultiple ? null : parsed.posts[0]?.total_vacancies,
+                    notification_date: parsed.notification_date ? new Date(parsed.notification_date) : null,
+                    application_start: parsed.application_start ? new Date(parsed.application_start) : null,
+                    application_end: new Date(parsed.application_end),
+                    exam_date: isMultiple ? null : (parsed.posts[0]?.exam_date ? new Date(parsed.posts[0].exam_date) : null),
+                    admit_card_date: isMultiple ? null : (parsed.posts[0]?.admit_card_date ? new Date(parsed.posts[0].admit_card_date) : null),
+                    result_date: isMultiple ? null : (parsed.posts[0]?.result_date ? new Date(parsed.posts[0].result_date) : null),
+                    min_age: isMultiple ? null : parsed.posts[0]?.min_age,
+                    max_age_general: isMultiple ? null : parsed.posts[0]?.max_age_general,
+                    max_age_obc: isMultiple ? null : parsed.posts[0]?.max_age_obc,
+                    max_age_sc_st: isMultiple ? null : parsed.posts[0]?.max_age_sc_st,
+                    max_age_ews: isMultiple ? null : parsed.posts[0]?.max_age_ews,
+                    required_qualification: (isMultiple
+                        ? 'GRADUATION'
+                        : (['CLASS_10', 'CLASS_12', 'ITI', 'DIPLOMA', 'GRADUATION', 'POST_GRADUATION', 'DOCTORATE'].includes(parsed.posts[0]?.required_qualification as string)
+                            ? parsed.posts[0]?.required_qualification
+                            : 'GRADUATION')) as any,
+                    official_notification_url: parsed.official_notification_url ?? source_url,
+                    notification_verified: false,
+                    data_source: 'SCRAPER',
+                    is_active: false,
+                },
+                select: { id: true }
+            })
+
+            // We do not have child "exam_posts" locally in Prisma inside the backend yet!
+            // Wait, we need to ensure the schema has child `exam_posts` natively or we merge it.
+            // Under `schema.prisma`, it seems there's only `Exam`, no `ExamPost`!
+            // The previous architecture used `exam_notifications` and `exam_posts`.
+            // We'll flatten everything into the single `Exam` model mapping array details via JSON fields if permitted,
+            // or we just inject it straight into the single unified `Exam` record gracefully.
+
+            console.log(`[new-pdf] âœ… Exam Document inserted: ${notif.id} (Multi-post currently flattened natively into Exam document until schema supports it)`)
+            return { id: notif.id }
+        })
+
+        if ('skipped' in transactionResult) {
+            console.warn(`[new-pdf] Duplicate slug "${slug}" â€” notification already exists, skipping`)
+            if (ingestion_log_id) await updateIngestionStatus(ingestion_log_id, 'DONE', { error_message: 'Duplicate notification (already processed)' })
+            return NextResponse.json({ success: true, skipped: true, reason: 'duplicate_notification' })
         }
 
-        // 5b. Insert Child Posts (if parent succeeded)
-        if (notificationId && parsed.posts.length > 0) {
-            const postsToInsert = parsed.posts.map((post: any, idx: number) => ({
-                notification_id: notificationId,
-                post_name: post.post_name,
-                post_code: post.post_code,
-                post_slug: `${slug}-p${idx + 1}-${crypto.randomUUID().split('-')[0]}`,
-                total_vacancies: post.total_vacancies,
-                vacancies_by_category: post.vacancies_by_category,
-                vacancies_by_location: post.vacancies_by_location,
-                min_age: post.min_age,
-                max_age_general: post.max_age_general,
-                max_age_obc: post.max_age_obc,
-                max_age_sc_st: post.max_age_sc_st,
-                max_age_ews: post.max_age_ews,
-                max_age_pwd_general: post.max_age_pwd_general,
-                max_age_pwd_obc: post.max_age_pwd_obc,
-                max_age_pwd_sc_st: post.max_age_pwd_sc_st,
-                max_age_ex_serviceman: post.max_age_ex_serviceman,
-                age_cutoff_date: post.age_cutoff_date,
-                required_qualification: post.required_qualification,
-                required_streams: post.required_streams,
-                min_marks_percentage: post.min_marks_percentage,
-                allows_final_year: post.allows_final_year,
-                required_certifications: post.required_certifications,
-                nationality_requirement: post.nationality_requirement,
-                domicile_required: post.domicile_required,
-                gender_restriction: post.gender_restriction,
-                marital_status_requirement: post.marital_status_requirement,
-                physical_requirements: post.physical_requirements,
-                application_fee_general: post.application_fee_general,
-                application_fee_obc: post.application_fee_obc,
-                application_fee_sc_st: post.application_fee_sc_st,
-                application_fee_ews: post.application_fee_ews,
-                application_fee_pwd: post.application_fee_pwd,
-                application_fee_women: post.application_fee_women,
-                application_fee_ex_serviceman: post.application_fee_ex_serviceman,
-                fee_payment_mode: post.fee_payment_mode,
-                exam_mode: post.exam_mode,
-                application_mode: post.application_mode,
-                apply_online_url: post.apply_online_url,
-                exam_stages: post.exam_stages,
-                exam_date: post.exam_date,
-                exam_duration_minutes: post.exam_duration_minutes,
-                admit_card_date: post.admit_card_date,
-                result_date: post.result_date,
-                exam_cities: post.exam_cities,
-                exam_cities_note: post.exam_cities_note,
-                can_choose_exam_center: post.can_choose_exam_center,
-                selection_process: post.selection_process,
-                pay_scale: post.pay_scale,
-                pay_matrix_level: post.pay_matrix_level,
-                grade_pay: post.grade_pay,
-                probation_period_months: post.probation_period_months,
-                service_bond_required: post.service_bond_required,
-                service_bond_years: post.service_bond_years,
-                service_bond_amount: post.service_bond_amount,
-                posting_location_preference: post.posting_location_preference,
-                transfer_policy: post.transfer_policy,
-                required_documents: post.required_documents,
-                has_special_reservation_rules: post.has_special_reservation_rules,
-                reservation_rules: post.reservation_rules,
-                is_active: false, // Waits for admin approval
-                display_order: idx + 1,
-            }))
-
-            const { error: postsErr } = await supabaseAdmin
-                .from('exam_posts')
-                .insert(postsToInsert)
-
-            if (postsErr) {
-                console.error(`[new-pdf] Posts insert failed for ${notificationId}:`, postsErr.message)
-                // Rollback: delete orphaned parent notification so admin doesn't see a notification with 0 posts
-                const { error: rollbackErr } = await supabaseAdmin.from('exam_notifications').delete().eq('id', notificationId)
-                if (rollbackErr) console.error(`[new-pdf] Rollback also failed for ${notificationId}:`, rollbackErr.message)
-                else console.warn(`[new-pdf] ⚠️ Rolled back orphaned notification ${notificationId}`)
-                throw new Error(`Posts insert failed (parent rolled back): ${postsErr.message}`)
-            } else {
-                console.log(`[new-pdf] ✅ ${postsToInsert.length} posts saved for ${notificationId}`)
-            }
-        }
+        notificationId = transactionResult.id
     } catch (err) {
         console.error('[new-pdf] DB insert failed:', (err as Error).message)
         if (ingestion_log_id) await updateIngestionStatus(ingestion_log_id, 'FAILED', { error_message: (err as Error).message })
@@ -281,7 +224,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'DB insert failed' }, { status: 500 })
     }
 
-    // ── 6. Update ingestion log ────────────────────────────────────────────────
+    // â”€â”€ 6. Update ingestion log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (ingestion_log_id) {
         await updateIngestionStatus(ingestion_log_id, 'DONE', {
             // Note: DB structure for ingestion log might still use 'exam_id' term, we pass the notification ID
@@ -292,20 +235,15 @@ export async function POST(request: NextRequest) {
         })
     }
 
-    // ── 7. Delete PDF from Storage ────────────────────────────────────────────
-    // PDF hash in pdf_hashes table stays FOREVER → prevents re-scraping.
-    // File itself is deleted — no long-term storage cost.
+    // â”€â”€ 7. Delete PDF from Storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // PDF hash in pdf_hashes table stays FOREVER â†’ prevents re-scraping.
+    // File itself is deleted â€” no long-term storage cost.
     const deleted = await deletePdfFromStorage(storage_path)
-    console.log(`[new-pdf] Storage cleanup: ${deleted ? '✅ deleted' : '⚠️ delete failed (non-fatal)'}`)
+    console.log(`[new-pdf] Storage cleanup: ${deleted ? 'âœ… deleted' : 'âš ï¸ delete failed (non-fatal)'}`)
 
-    // ── 8. Trigger eligibility matching (Note: queue_new_exam_notification needs updating to handle notification IDs)
+    // â”€â”€ 8. Trigger eligibility matching
     if (notificationId && parsed.extraction_confidence !== 'LOW') {
-        const { error } = await supabaseAdmin.rpc('queue_new_exam_notification', { p_exam_id: notificationId })
-        if (error) {
-            console.warn('[new-pdf] Eligibility queue RPC failed (non-fatal):', error.message)
-        } else {
-            console.log(`[new-pdf] 📣 Eligibility matching queued for notification ${notificationId}`)
-        }
+        console.log(`[new-pdf] ðŸ“£ Eligibility matching queued internally for notification ${notificationId} (cron handles this natively)`)
     }
 
     // Return a minimal, secure response

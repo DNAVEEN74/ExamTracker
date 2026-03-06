@@ -1,5 +1,7 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { sendOtpEmail } from '@/lib/email/email.service'
+
 
 /**
  * POST /api/webhooks/auth/email

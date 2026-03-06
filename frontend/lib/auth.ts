@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyJWT } from '@/lib/supabase/admin'
+import { verifyJWT, type AuthUser } from '@/lib/jwt'
 
-export interface AuthUser {
-    id: string
-    email?: string
-    phone?: string
-    app_metadata: Record<string, unknown>
-}
+export type { AuthUser }
 
 /**
- * Reads the Authorization: Bearer <token> header, verifies the Supabase JWT,
- * and returns the authenticated user.
+ * Reads the Authorization: Bearer <token> header OR the 'auth-token' HTTP-only cookie,
+ * verifies the custom JWT, and returns the authenticated user.
  *
  * Returns { user, errorResponse: null } on success.
  * Returns { user: null, errorResponse: NextResponse<401> } on failure.
@@ -18,37 +13,39 @@ export interface AuthUser {
 export async function requireAuth(
     request: NextRequest
 ): Promise<{ user: AuthUser; errorResponse: null } | { user: null; errorResponse: NextResponse }> {
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader?.startsWith('Bearer ')) {
+    let token = request.cookies.get('auth-token')?.value
+
+    if (!token) {
+        const authHeader = request.headers.get('authorization')
+        if (authHeader?.startsWith('Bearer ')) {
+            token = authHeader.replace('Bearer ', '')
+        }
+    }
+
+    if (!token) {
         return {
             user: null,
             errorResponse: NextResponse.json(
-                { success: false, error: 'Missing or invalid Authorization header' },
+                { success: false, error: 'Unauthorized: Missing token' },
                 { status: 401 }
             ),
         }
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const supabaseUser = await verifyJWT(token)
+    const user = await verifyJWT(token)
 
-    if (!supabaseUser) {
+    if (!user) {
         return {
             user: null,
             errorResponse: NextResponse.json(
-                { success: false, error: 'Invalid or expired token' },
+                { success: false, error: 'Unauthorized: Invalid or expired token' },
                 { status: 401 }
             ),
         }
     }
 
     return {
-        user: {
-            id: supabaseUser.id,
-            email: supabaseUser.email,
-            phone: supabaseUser.phone,
-            app_metadata: supabaseUser.app_metadata as Record<string, unknown>,
-        },
+        user,
         errorResponse: null,
     }
 }
@@ -58,8 +55,7 @@ export async function requireAuth(
  * Returns a 403 NextResponse if not authorized, or null if OK.
  */
 export function requireAdminRole(user: AuthUser): NextResponse | null {
-    const role = user.app_metadata?.role as string | undefined
-    if (role !== 'admin' && role !== 'editor') {
+    if (user.role !== 'admin' && user.role !== 'editor') {
         return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 })
     }
     return null

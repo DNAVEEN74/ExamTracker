@@ -1,7 +1,9 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireAdminRole } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
+
 
 /** GET /api/admin/queue */
 export async function GET(request: NextRequest) {

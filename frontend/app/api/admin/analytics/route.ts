@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireAdminRole } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import db from '@/lib/db'
+
+export const dynamic = 'force-dynamic'
 
 /** GET /api/admin/analytics */
 export async function GET(request: NextRequest) {
@@ -21,32 +23,34 @@ export async function GET(request: NextRequest) {
         sevenDaysAgo.setDate(now.getDate() - 7)
 
         const [
-            { count: totalUsers },
-            { count: onboardingCompleted },
-            { count: activeExams },
-            { count: examsClosing7d },
+            totalUsers,
+            onboardingCompleted,
+            activeExams,
+            examsClosing7d,
+            dau7d
         ] = await Promise.all([
-            supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
-            supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('onboarding_completed', true),
-            supabaseAdmin.from('exams').select('id', { count: 'exact', head: true }).eq('is_active', true),
-            supabaseAdmin.from('exams').select('id', { count: 'exact', head: true })
-                .eq('is_active', true)
-                .lte('application_end', sevenDays.toISOString().split('T')[0]),
+            db.user.count({ where: { is_deleted: false } }),
+            db.user.count({ where: { onboarding_completed: true } }),
+            db.exam.count({ where: { is_active: true } }),
+            db.exam.count({
+                where: {
+                    is_active: true,
+                    application_end: { lte: sevenDays }
+                }
+            }),
+            db.user.count({
+                where: { last_active_at: { gte: sevenDaysAgo } }
+            })
         ])
-
-        const { count: dau7d } = await supabaseAdmin
-            .from('users')
-            .select('id', { count: 'exact', head: true })
-            .gte('last_active_at', sevenDaysAgo.toISOString())
 
         return NextResponse.json({
             success: true,
             data: {
-                total_users: totalUsers ?? 0,
-                onboarding_completed: onboardingCompleted ?? 0,
-                daily_active_7d: dau7d ?? 0,
-                active_exams: activeExams ?? 0,
-                exams_closing_7d: examsClosing7d ?? 0,
+                total_users: totalUsers,
+                onboarding_completed: onboardingCompleted,
+                daily_active_7d: dau7d,
+                active_exams: activeExams,
+                exams_closing_7d: examsClosing7d,
                 emails_sent_today: 0,
                 notification_failures_24h: 0,
             },

@@ -1,9 +1,11 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as eligibilityService from '@/lib/services/eligibility.service'
 import * as userService from '@/lib/services/user.service'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import db from '@/lib/db'
+
 
 /** GET /api/dashboard/new-matches */
 export async function GET(request: NextRequest) {
@@ -14,11 +16,10 @@ export async function GET(request: NextRequest) {
     if (rl) return rl
 
     try {
-        const { data: userData } = await supabaseAdmin
-            .from('users')
-            .select('last_active_at')
-            .eq('id', user.id)
-            .single()
+        const userData = await db.user.findUnique({
+            where: { id: user.id },
+            select: { last_active_at: true }
+        })
 
         const { exams } = await eligibilityService.getEligibleExams(user.id, { limit: 50 })
         const lastActive = userData?.last_active_at ? new Date(userData.last_active_at) : new Date(0)

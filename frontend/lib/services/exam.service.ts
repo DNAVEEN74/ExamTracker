@@ -1,4 +1,4 @@
-import { supabaseAdmin as supabase } from '@/lib/supabase/admin'
+import db from '@/lib/db'
 import type { Exam, TrackedExam } from '@/types/api'
 
 /** Paginated exam list for admin panel with optional filters */
@@ -12,37 +12,42 @@ export async function getExams(opts: {
     const { page = 1, limit = 20, search, status, category } = opts
     const offset = (page - 1) * limit
 
-    let query = supabase
-        .from('exams')
-        .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-
-    if (search) query = query.ilike('name', `%${search}%`)
-    if (category) query = query.eq('category', category)
+    const where: any = {}
+    if (search) where.name = { contains: search, mode: 'insensitive' }
+    if (category) where.category = category
     if (status === 'NEEDS_REVIEW') {
-        query = query.eq('notification_verified', false).eq('is_active', false)
+        where.notification_verified = false
+        where.is_active = false
     } else if (status === 'ACTIVE') {
-        query = query.eq('is_active', true)
+        where.is_active = true
     } else if (status === 'CANCELLED') {
-        query = query.eq('is_cancelled', true)
+        where.is_cancelled = true
     }
 
-    const { data, count, error } = await query.range(offset, offset + limit - 1)
-    if (error) throw new Error(`Failed to fetch exams: ${error.message}`)
-
-    return { exams: data ?? [], total: count ?? 0 }
+    try {
+        const [exams, total] = await Promise.all([
+            db.exam.findMany({
+                where,
+                skip: offset,
+                take: limit,
+                orderBy: { created_at: 'desc' }
+            }),
+            db.exam.count({ where })
+        ])
+        return { exams: exams as unknown as Exam[], total }
+    } catch (error: any) {
+        throw new Error(`Failed to fetch exams: ${error.message}`)
+    }
 }
 
 /** Single exam detail */
 export async function getExamById(id: string): Promise<Exam | null> {
-    const { data, error } = await supabase
-        .from('exams')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle()
-
-    if (error) throw new Error(`Failed to fetch exam: ${error.message}`)
-    return data
+    try {
+        const exam = await db.exam.findUnique({ where: { id } })
+        return exam as unknown as Exam | null
+    } catch (error: any) {
+        throw new Error(`Failed to fetch exam: ${error.message}`)
+    }
 }
 
 function slugify(name: string): string {
@@ -55,55 +60,54 @@ function slugify(name: string): string {
 }
 
 /** Create a new exam record */
-export async function createExam(data: Record<string, unknown>, createdBy: string) {
+export async function createExam(data: Record<string, any>, createdBy: string) {
     const slug = `${slugify(data.name as string)}-${Date.now()}`
 
-    const { data: exam, error } = await supabase
-        .from('exams')
-        .insert({
-            ...data,
-            slug,
-            created_by: createdBy,
-            data_source: 'MANUAL',
-            notification_verified: false,
-            is_active: false,
+    try {
+        const exam = await db.exam.create({
+            data: {
+                ...data,
+                slug,
+                created_by: createdBy,
+                data_source: 'MANUAL',
+                notification_verified: false,
+                is_active: false,
+            } as any
         })
-        .select()
-        .single()
-
-    if (error) throw new Error(`Failed to create exam: ${error.message}`)
-    return exam
+        return exam as unknown as Exam
+    } catch (error: any) {
+        throw new Error(`Failed to create exam: ${error.message}`)
+    }
 }
 
 /** Update an existing exam */
-export async function updateExam(id: string, data: Record<string, unknown>) {
-    const { data: exam, error } = await supabase
-        .from('exams')
-        .update({ ...data, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single()
-
-    if (error) throw new Error(`Failed to update exam: ${error.message}`)
-    return exam
+export async function updateExam(id: string, data: Record<string, any>) {
+    try {
+        const exam = await db.exam.update({
+            where: { id },
+            data
+        })
+        return exam as unknown as Exam
+    } catch (error: any) {
+        throw new Error(`Failed to update exam: ${error.message}`)
+    }
 }
 
 /** Approve exam — sets notification_verified + is_active */
 export async function approveExam(id: string) {
-    const { data: exam, error } = await supabase
-        .from('exams')
-        .update({
-            notification_verified: true,
-            is_active: true,
-            last_verified_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+    try {
+        const exam = await db.exam.update({
+            where: { id },
+            data: {
+                notification_verified: true,
+                is_active: true,
+                last_verified_at: new Date(),
+            }
         })
-        .eq('id', id)
-        .select()
-        .single()
-
-    if (error) throw new Error(`Failed to approve exam: ${error.message}`)
-    return exam
+        return exam as unknown as Exam
+    } catch (error: any) {
+        throw new Error(`Failed to approve exam: ${error.message}`)
+    }
 }
 
 /** Duplicate an exam (for annual re-runs) — new row with cleared dates */
@@ -111,108 +115,125 @@ export async function duplicateExam(id: string, createdBy: string) {
     const exam = await getExamById(id)
     if (!exam) throw new Error('Exam not found')
 
-    const { id: _old, slug: _slug, created_at: _ca, updated_at: _ua, last_verified_at: _lva, ...rest } = exam
     const newSlug = `${slugify(exam.name)}-${Date.now()}`
+    const { id: _id, slug: _slug, created_at: _ca, updated_at: _ua, last_verified_at: _lva, ...rest } = exam
 
-    const { data: newExam, error } = await supabase
-        .from('exams')
-        .insert({
-            ...rest,
-            slug: newSlug,
-            is_active: false,
-            notification_verified: false,
-            application_start: null,
-            application_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            exam_date: null,
-            admit_card_date: null,
-            result_date: null,
-            notification_date: null,
-            created_by: createdBy,
+    try {
+        const newExam = await db.exam.create({
+            data: {
+                ...(rest as any),
+                slug: newSlug,
+                is_active: false,
+                notification_verified: false,
+                application_start: null,
+                application_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                exam_date: null,
+                admit_card_date: null,
+                result_date: null,
+                notification_date: null,
+                created_by: createdBy,
+            }
         })
-        .select()
-        .single()
-
-    if (error) throw new Error(`Failed to duplicate exam: ${error.message}`)
-    return newExam
+        return newExam as unknown as Exam
+    } catch (error: any) {
+        throw new Error(`Failed to duplicate exam: ${error.message}`)
+    }
 }
 
 /** Full-text search on exam name/short_name */
 export async function searchExams(query: string): Promise<Exam[]> {
-    const { data, error } = await supabase
-        .from('exams')
-        .select('*')
-        .or(`name.ilike.%${query}%,short_name.ilike.%${query}%,conducting_body.ilike.%${query}%`)
-        .eq('is_active', true)
-        .order('application_end', { ascending: true })
-        .limit(20)
-
-    if (error) throw new Error(`Search failed: ${error.message}`)
-    return data ?? []
+    try {
+        const exams = await db.exam.findMany({
+            where: {
+                is_active: true,
+                OR: [
+                    { name: { contains: query, mode: 'insensitive' } },
+                    { short_name: { contains: query, mode: 'insensitive' } },
+                    { conducting_body: { contains: query, mode: 'insensitive' } }
+                ]
+            },
+            orderBy: { application_end: 'asc' },
+            take: 20
+        })
+        return exams as unknown as Exam[]
+    } catch (error: any) {
+        throw new Error(`Search failed: ${error.message}`)
+    }
 }
 
 /** Track an exam for a user */
 export async function trackExam(userId: string, examId: string) {
-    const { data, error } = await supabase
-        .from('tracked_exams')
-        .upsert(
-            { user_id: userId, exam_id: examId, status: 'TRACKING' },
-            { onConflict: 'user_id,exam_id' }
-        )
-        .select()
-        .single()
-
-    if (error) throw new Error(`Failed to track exam: ${error.message}`)
-    return data
+    try {
+        const data = await db.trackedExam.upsert({
+            where: {
+                user_id_exam_id: { user_id: userId, exam_id: examId }
+            },
+            update: { status: 'TRACKING' },
+            create: { user_id: userId, exam_id: examId, status: 'TRACKING' }
+        })
+        return data as unknown as TrackedExam
+    } catch (error: any) {
+        throw new Error(`Failed to track exam: ${error.message}`)
+    }
 }
 
 /** Untrack an exam */
 export async function untrackExam(userId: string, examId: string) {
-    const { error } = await supabase
-        .from('tracked_exams')
-        .delete()
-        .eq('user_id', userId)
-        .eq('exam_id', examId)
-
-    if (error) throw new Error(`Failed to untrack exam: ${error.message}`)
-    return true
+    try {
+        await db.trackedExam.delete({
+            where: {
+                user_id_exam_id: { user_id: userId, exam_id: examId }
+            }
+        })
+        return true
+    } catch (error: any) {
+        throw new Error(`Failed to untrack exam: ${error.message}`)
+    }
 }
 
 /** Get all tracked exams for a user with exam details joined */
 export async function getTrackedExams(userId: string): Promise<TrackedExam[]> {
-    const { data, error } = await supabase
-        .from('tracked_exams')
-        .select(`*, exam:exams(*)`)
-        .eq('user_id', userId)
-        .order('tracked_at', { ascending: false })
-
-    if (error) throw new Error(`Failed to get tracked exams: ${error.message}`)
-    return (data ?? []) as TrackedExam[]
+    try {
+        const data = await db.trackedExam.findMany({
+            where: { user_id: userId },
+            include: { exam: true },
+            orderBy: { tracked_at: 'desc' }
+        })
+        return data as unknown as TrackedExam[]
+    } catch (error: any) {
+        throw new Error(`Failed to get tracked exams: ${error.message}`)
+    }
 }
 
 /** Get tracked exams ordered by upcoming application deadline */
 export async function getUpcomingDeadlines(userId: string): Promise<TrackedExam[]> {
-    const { data, error } = await supabase
-        .from('tracked_exams')
-        .select(`*, exam:exams(*)`)
-        .eq('user_id', userId)
-        .order('exam(application_end)', { ascending: true })
-        .limit(10)
-
-    if (error) throw new Error(`Failed to get deadlines: ${error.message}`)
-    return (data ?? []) as TrackedExam[]
+    try {
+        const data = await db.trackedExam.findMany({
+            where: { user_id: userId },
+            include: { exam: true },
+            orderBy: {
+                exam: { application_end: 'asc' }
+            },
+            take: 10
+        })
+        return data as unknown as TrackedExam[]
+    } catch (error: any) {
+        throw new Error(`Failed to get deadlines: ${error.message}`)
+    }
 }
 
 /** Get exams with NEEDS_REVIEW status for the admin queue */
 export async function getReviewQueue(opts: { status?: string; category?: string }) {
-    let query = supabase
-        .from('exams')
-        .select('*')
-        .eq('notification_verified', false)
-        .order('application_end', { ascending: true })
+    const where: any = { notification_verified: false }
+    if (opts.category) where.category = opts.category
 
-    if (opts.category) query = query.eq('category', opts.category)
-
-    const { data, error } = await query
-    if (error) throw new Error(`Failed to get review queue: ${error.message}`)
-    return data ?? []
+    try {
+        const data = await db.exam.findMany({
+            where,
+            orderBy: { application_end: 'asc' }
+        })
+        return data as unknown as Exam[]
+    } catch (error: any) {
+        throw new Error(`Failed to get review queue: ${error.message}`)
+    }
 }

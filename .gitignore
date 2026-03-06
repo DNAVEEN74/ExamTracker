@@ -41,3 +41,5 @@ scraper/screenshots/
 # ─── Temp ─────────────────────────────────────────────────────────────────────
 tmp/
 temp/
+
+/generated/prisma

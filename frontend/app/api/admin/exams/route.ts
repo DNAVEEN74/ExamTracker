@@ -4,6 +4,9 @@ import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
 import { createExamSchema } from '@/lib/validators/exam.validator'
 
+
+export const dynamic = 'force-dynamic'
+
 /** GET /api/admin/exams */
 export async function GET(request: NextRequest) {
     const { user, errorResponse } = await requireAuth(request)

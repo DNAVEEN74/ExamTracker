@@ -1,8 +1,10 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import { updateNotificationPreferencesSchema } from '@/lib/validators/notification.validator'
 import * as notificationService from '@/lib/services/notification.service'
+
 
 /** GET /api/notifications/preferences */
 export async function GET(request: NextRequest) {

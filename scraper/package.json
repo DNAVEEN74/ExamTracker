@@ -6,22 +6,27 @@
     "main": "index.js",
     "scripts": {
         "start": "node index.js",
-        "dev": "LOG_LEVEL=debug PRIORITY_FILTER=P0 node index.js",
-        "scrape:p0": "PRIORITY_FILTER=P0 node index.js",
-        "scrape:p1": "PRIORITY_FILTER=P1 node index.js",
-        "scrape:p2": "PRIORITY_FILTER=P2 node index.js",
-        "scrape:p3": "PRIORITY_FILTER=P3 node index.js",
-        "scrape:all": "PRIORITY_FILTER=P0,P1,P2,P3 node index.js"
+        "dev": "cross-env LOG_LEVEL=debug PRIORITY_FILTER=P0 node index.js",
+        "scrape:p0": "cross-env PRIORITY_FILTER=P0 node index.js",
+        "scrape:p1": "cross-env PRIORITY_FILTER=P1 node index.js",
+        "scrape:p2": "cross-env PRIORITY_FILTER=P2 node index.js",
+        "scrape:p3": "cross-env PRIORITY_FILTER=P3 node index.js",
+        "scrape:all": "cross-env PRIORITY_FILTER=P0,P1,P2,P3 node index.js"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.1000.0",
+        "@prisma/client": "^7.4.2",
         "@supabase/supabase-js": "^2.39.0",
         "axios": "^1.6.0",
         "cheerio": "^1.0.0",
+        "cross-env": "^10.1.0",
         "dotenv": "^16.0.0",
         "p-limit": "^5.0.0",
+        "p-retry": "^7.1.1",
         "pino": "^8.17.0",
         "pino-pretty": "^10.0.0",
-        "playwright": "^1.40.0"
+        "playwright": "^1.40.0",
+        "prisma": "^7.4.2"
     },
     "engines": {
         "node": ">=18.0.0"

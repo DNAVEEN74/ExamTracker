@@ -1,8 +1,10 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import { trackExamSchema } from '@/lib/validators/exam.validator'
 import * as examService from '@/lib/services/exam.service'
+
 
 /** POST /api/exams/track */
 export async function POST(request: NextRequest) {

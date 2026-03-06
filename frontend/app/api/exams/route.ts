@@ -3,6 +3,9 @@ import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as eligibilityService from '@/lib/services/eligibility.service'
 
+
+export const dynamic = 'force-dynamic'
+
 /** GET /api/exams — All eligible exams for the user (paginated) */
 export async function GET(request: NextRequest) {
     const { user, errorResponse } = await requireAuth(request)

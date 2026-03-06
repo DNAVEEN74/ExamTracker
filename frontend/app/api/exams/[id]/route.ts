@@ -3,7 +3,10 @@ import { requireAuth } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
 import * as eligibilityService from '@/lib/services/eligibility.service'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+import db from '@/lib/db'
+
+
+export const dynamic = 'force-dynamic'
 
 /** GET /api/exams/[id] — Single exam with eligibility flag */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -20,11 +23,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             return NextResponse.json({ success: false, error: 'Exam not found' }, { status: 404 })
         }
 
-        const { data: profile } = await supabaseAdmin
-            .from('user_profiles')
-            .select('*')
-            .eq('user_id', user.id)
-            .maybeSingle()
+        const profile = await db.userProfile.findUnique({
+            where: { user_id: user.id }
+        })
 
         const eligibilityFlag = eligibilityService.computeEligibilityFlag(
             profile as Record<string, unknown> | null,

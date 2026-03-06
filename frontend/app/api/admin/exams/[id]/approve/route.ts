@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireAdminRole } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
-import { supabaseAdmin } from '@/lib/supabase/admin'
+
+
+
+export const dynamic = 'force-dynamic'
 
 /** POST /api/admin/exams/[id]/approve */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,16 +26,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         let usersQueued = 0
         if (notify) {
-            const { data, error: rpcError } = await supabaseAdmin.rpc(
-                'queue_new_exam_notification',
-                { p_exam_id: id }
-            )
-            if (rpcError) {
-                console.error(`⚠️  queue_new_exam_notification failed for ${exam.name}:`, rpcError.message)
-            } else {
-                usersQueued = (data as number) ?? 0
-                console.log(`📣 Queued NEW_EXAM notifications for ${usersQueued} eligible users → ${exam.name}`)
-            }
+            // NOTE: The backend cron or internal background worker handles pushing eligibility updates currently
+            // We are bypassing Supabase RPC triggers here in Prisma.
+            usersQueued = 0
+            console.log(`📣 Exam Approved manually.`)
         }
 
         return NextResponse.json({

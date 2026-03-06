@@ -3,6 +3,9 @@ import { requireAuth, requireAdminRole } from '@/lib/auth'
 import { applyRateLimit } from '@/lib/rateLimit'
 import * as examService from '@/lib/services/exam.service'
 
+
+export const dynamic = 'force-dynamic'
+
 /** POST /api/admin/exams/[id]/duplicate */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { user, errorResponse } = await requireAuth(request)

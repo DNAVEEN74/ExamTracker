@@ -19,7 +19,8 @@
         "scrape_interval_hrs": 2,
         "scrape_method": "html_parse",
         "has_rss": false,
-        "pdf_link_pattern": ".pdf",
+        "pdf_selector": "a[href*='.pdf'], a[href*='download']",
+        "detail_page_selector": ".notice_list a[href*='/Notice/']",
         "notes": "CORRECTED: Migrated from ssc.nic.in to ssc.gov.in. CGL, CHSL, MTS, CPO, JE, Steno all come from here. Check Portal/Notices for new notifications.",
         "category": "SSC",
         "regional_portals": [
@@ -508,6 +509,11 @@
         "priority": "P1",
         "scrape_interval_hrs": 6,
         "scrape_method": "html_parse",
+        "pagination": {
+          "type": "query_param",
+          "param": "page",
+          "max_pages": 3
+        },
         "state": "KL",
         "category": "STATE_PSC"
       },

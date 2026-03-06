@@ -1,4 +1,4 @@
-import { supabaseAdmin as supabase } from '@/lib/supabase/admin'
+import db from '@/lib/db'
 import type { Exam, EligibilitySummary, EligibilityFlag, Category } from '@/types/api'
 
 const QUALIFICATION_ORDER: Record<string, number> = {
@@ -25,8 +25,7 @@ export interface EligibleExamsOptions {
 }
 
 /**
- * Runs the eligibility matching query via Supabase RPC.
- * Falls back to a direct query if the RPC function isn't deployed yet.
+ * Runs the eligibility matching query. Direct Prisma conversion without RPC fallback.
  */
 export async function getEligibleExams(
     userId: string,
@@ -35,70 +34,54 @@ export async function getEligibleExams(
     const { page = 1, limit = 20, category, closing_in_days } = opts
     const offset = (page - 1) * limit
 
-    try {
-        const { data: rpcData, error: rpcError } = await supabase.rpc(
-            'get_eligible_exams_for_user',
-            { user_id: userId }
-        )
-
-        if (!rpcError && rpcData) {
-            let results: Exam[] = rpcData
-
-            if (category) results = results.filter((e) => e.category === category)
-            if (closing_in_days) {
-                const cutoff = new Date()
-                cutoff.setDate(cutoff.getDate() + Number(closing_in_days))
-                results = results.filter((e) => new Date(e.application_end) <= cutoff)
-            }
-
-            const total = results.length
-            return { exams: results.slice(offset, offset + limit), total }
-        }
-    } catch {
-        // RPC not deployed — fall through to direct query
-    }
-
-    // ── Direct query fallback ──────────────────────────────────────────────────
-    const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle()
+    const profile = await db.userProfile.findUnique({
+        where: { user_id: userId }
+    })
 
     if (!profile) return { exams: [], total: 0 }
 
-    const { data: user } = await supabase
-        .from('users')
-        .select('onboarding_mode')
-        .eq('id', userId)
-        .single()
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { onboarding_mode: true }
+    })
 
-    let query = supabase
-        .from('exams')
-        .select('*', { count: 'exact' })
-        .eq('is_active', true)
-        .eq('is_cancelled', false)
-        .gte('application_end', new Date().toISOString().split('T')[0])
-        .order('application_end', { ascending: true })
+    const where: any = {
+        is_active: true,
+        is_cancelled: false,
+        application_end: {
+            gte: new Date(new Date().toISOString().split('T')[0])
+        }
+    }
 
-    if (category) query = query.eq('category', category)
+    if (category) where.category = category
     if (closing_in_days) {
         const cutoff = new Date()
         cutoff.setDate(cutoff.getDate() + Number(closing_in_days))
-        query = query.lte('application_end', cutoff.toISOString().split('T')[0])
+        where.application_end.lte = new Date(cutoff.toISOString().split('T')[0])
     }
     if (profile.exam_categories?.length) {
-        query = query.in('category', profile.exam_categories)
+        where.category = { in: profile.exam_categories }
     }
 
-    const { data: exams, count, error } = await query.range(offset, offset + limit - 1)
-    if (error) throw new Error(`Exam query failed: ${error.message}`)
+    try {
+        const [exams, count] = await Promise.all([
+            db.exam.findMany({
+                where,
+                skip: offset,
+                take: limit,
+                orderBy: { application_end: 'asc' }
+            }),
+            db.exam.count({ where })
+        ])
 
-    const filtered = (exams ?? []).filter((exam) =>
-        isEligibleClientSide(profile, user?.onboarding_mode ?? 'DISCOVERY', exam)
-    )
+        const filtered = (exams ?? []).filter((exam) =>
+            isEligibleClientSide(profile, user?.onboarding_mode ?? 'DISCOVERY', exam)
+        )
 
-    return { exams: filtered, total: count ?? 0 }
+        return { exams: filtered as unknown as Exam[], total: count ?? 0 }
+    } catch (error: any) {
+        throw new Error(`Exam query failed: ${error.message}`)
+    }
 }
 
 function isEligibleClientSide(
@@ -106,10 +89,10 @@ function isEligibleClientSide(
     mode: string,
     exam: Record<string, unknown>
 ): boolean {
-    const dob = profile.date_of_birth as string
+    const dob = profile.date_of_birth as Date | undefined
     if (!dob) return true
 
-    const ageCutoff = (exam.age_cutoff_date as string) || (exam.application_end as string)
+    const ageCutoff = (exam.age_cutoff_date as Date | undefined) || (exam.application_end as Date)
     const age = (new Date(ageCutoff).getTime() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
     const maxAge = (exam.max_age_general as number) ?? 99
     const minAge = (exam.min_age as number) ?? 0
@@ -139,11 +122,10 @@ export async function getEligibilitySummary(userId: string): Promise<Eligibility
     const sevenDays = new Date(now)
     sevenDays.setDate(now.getDate() + 7)
 
-    const { data: user } = await supabase
-        .from('users')
-        .select('last_active_at')
-        .eq('id', userId)
-        .single()
+    const user = await db.user.findUnique({
+        where: { id: userId },
+        select: { last_active_at: true }
+    })
 
     const lastActive = user?.last_active_at ? new Date(user.last_active_at) : new Date(0)
 

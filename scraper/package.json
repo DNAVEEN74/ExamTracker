@@ -11,12 +11,13 @@
         "scrape:p1": "cross-env PRIORITY_FILTER=P1 node index.js",
         "scrape:p2": "cross-env PRIORITY_FILTER=P2 node index.js",
         "scrape:p3": "cross-env PRIORITY_FILTER=P3 node index.js",
-        "scrape:all": "cross-env PRIORITY_FILTER=P0,P1,P2,P3 node index.js"
+        "scrape:all": "cross-env PRIORITY_FILTER=P0,P1,P2,P3 node index.js",
+        "test:ssc": "node test-ssc-local.js"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.1000.0",
+        "@google/generative-ai": "^0.21.0",
         "@prisma/client": "^7.4.2",
-        "@supabase/supabase-js": "^2.39.0",
         "axios": "^1.6.0",
         "cheerio": "^1.0.0",
         "cross-env": "^10.1.0",

@@ -53,7 +53,7 @@ export class PageFetcher {
                 waitUntil: 'domcontentloaded',
                 timeout: CONFIG.timeoutMs,
             })
-            await page.waitForTimeout(3000)
+            await page.waitForTimeout(800) // Brief pause — waitForSelector below is the real signal
             await page.waitForSelector('table, ul, .notification, .notice, #main-content', {
                 timeout: 5000
             }).catch(() => { /* selector not found — proceed anyway */ })

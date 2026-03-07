@@ -99,10 +99,16 @@ export async function recordIngestionLog(entry) {
             const data = await prisma.pdfIngestionLog.create({
                 data: {
                     pdf_hash: entry.pdf_hash,
-                    ai_status: entry.ai_status || "PENDING",
-                    ai_error: entry.ai_error,
-                    exam_id: entry.exam_id,
-                    processing_time: entry.processing_time,
+                    site_id: entry.site_id ?? null,
+                    source_url: entry.source_url ?? null,
+                    storage_path: entry.storage_path ?? null,
+                    link_text: entry.link_text ?? null,
+                    context_text: entry.context_text ?? null,
+                    status: entry.status ?? 'QUEUED',
+                    ai_status: entry.ai_status ?? 'PENDING',
+                    ai_error: entry.ai_error ?? null,
+                    exam_id: entry.exam_id ?? null,
+                    processing_time: entry.processing_time ?? null,
                 }
             })
             return data.id

@@ -4,12 +4,15 @@ import https from 'https'
 import { CONFIG } from '../config/index.js'
 import { logger } from '../utils/logger.js'
 
+// Shared HTTPS agent — created once, reused across all RSS fetches in this run
+const httpsAgent = new https.Agent({ rejectUnauthorized: false })
+
 export async function fetchRssLinks(rssUrl) {
     try {
         const res = await axios.get(rssUrl, {
             headers: { 'User-Agent': CONFIG.userAgent, Accept: 'application/rss+xml,application/xml,text/xml' },
             timeout: CONFIG.timeoutMs,
-            httpsAgent: new https.Agent({ rejectUnauthorized: false })
+            httpsAgent
         })
         const $ = cheerio.load(res.data, { xmlMode: true })
         const items = []

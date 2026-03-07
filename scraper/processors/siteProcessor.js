@@ -8,31 +8,26 @@ import { writeScraperLog, getLastContentHash } from '../services/database.js'
 import { processPdfLink } from './pdfProcessor.js'
 import { fetchRssLinks } from './rssExtractor.js'
 import { extractLinks } from './htmlExtractor.js'
-import { isRelevantLink } from './relevanceFilter.js'
+import { fetchApiLinks } from './apiExtractor.js'
+// Note: relevanceFilter.js is no longer used for gating — AI classifier in pdfProcessor handles classification
 
 async function processLevel1Links(links, site, fetcher) {
     const limitMap = pLimit(CONFIG.concurrency)
     const validPdfs = []
 
     await Promise.all(links.map(link => limitMap(async () => {
-        // Stage 4: Relevance Filter
-        if (!isRelevantLink(link.link_text, link.context)) {
-            return
-        }
-
-        // Stage 3: Deep Crawl for Detail Pages
+        // Deep Crawl for Detail Pages — collect PDFs from linked detail pages
         if (link.type === 'detail_page') {
             logger.debug({ url: link.url }, 'Deep crawling detail page')
             try {
-                const { html } = await fetcher.fetchStatic(link.url) // Assumes detail pages are usually static
+                const { html } = await fetcher.fetchStatic(link.url)
                 if (html) {
                     const $ = cheerio.load(html)
-                    // We only want PDFs from the detail page, no generic recursions
                     const detailPdfs = extractLinks($, link.url, site).filter(l => l.type === 'pdf')
-
                     for (const pdf of detailPdfs) {
-                        // Inherit context from the Level 0 link so AI gets the real title
+                        // Inherit context from the Level 0 link so AI classifier gets the real title
                         pdf.context = `${link.link_text} | ${link.context} | ${pdf.link_text}`
+                        pdf.headline = link.link_text // Pass the human-readable title to AI classifier
                         validPdfs.push(pdf)
                     }
                 }
@@ -42,7 +37,7 @@ async function processLevel1Links(links, site, fetcher) {
             return
         }
 
-        // Direct PDFs and Dynamic downloads flow through directly
+        // Direct PDFs and Dynamic downloads flow through to AI classifier in pdfProcessor
         validPdfs.push(link)
     })))
 
@@ -53,6 +48,25 @@ export async function processSite(site, fetcher) {
     const startMs = Date.now()
     logger.info({ site: site.id }, `→ ${site.name}`)
 
+    // ── API-based scraping (for Angular/React SPA sites that load data via XHR) ──
+    if (site.scrape_method === 'api') {
+        const apiLinks = await fetchApiLinks(site)
+        if (apiLinks.length === 0) {
+            await writeScraperLog({ site_id: site.id, status: 'NO_CHANGE', duration_ms: Date.now() - startMs, new_pdfs_found: 0 })
+            return { siteId: site.id, status: 'NO_CHANGE' }
+        }
+
+        const limitMap = pLimit(CONFIG.concurrency)
+        const results = await Promise.all(
+            apiLinks.map(l => limitMap(() => processPdfLink(l, site)))
+        )
+        const recruited = results.filter(r => r?.status === 'OK')
+
+        await writeScraperLog({ site_id: site.id, status: 'OK', duration_ms: Date.now() - startMs, new_pdfs_found: recruited.length })
+        return { siteId: site.id, status: 'OK', newPdfs: recruited.length }
+    }
+
+    // ── RSS-based scraping ────────────────────────────────────────────────────
     if (site.has_rss && site.rss_url) {
         const rssLinks = await fetchRssLinks(site.rss_url)
         const rssHash = crypto.createHash('md5')
@@ -65,13 +79,13 @@ export async function processSite(site, fetcher) {
             return { siteId: site.id, status: 'NO_CHANGE' }
         }
 
-        // Apply Relevance Filter + Deep Crawling Pipeline to RSS items
+        // Deep crawl RSS links — AI classifier in pdfProcessor decides what to parse
         const finalPdfLinks = await processLevel1Links(rssLinks, site, fetcher)
 
         const limitMap = pLimit(CONFIG.concurrency)
         const processed = (await Promise.all(
             finalPdfLinks.map(l => limitMap(() => processPdfLink(l, site)))
-        )).filter(Boolean)
+        )).filter(r => r?.status === 'OK')
 
         await writeScraperLog({ site_id: site.id, status: 'OK', content_hash: rssHash, duration_ms: Date.now() - startMs, new_pdfs_found: processed.length })
         return { siteId: site.id, status: 'OK', newPdfs: processed.length }
@@ -130,13 +144,16 @@ export async function processSite(site, fetcher) {
         // --- Stage 5: PDF Pipeline ---
         const processedPageResults = (await Promise.all(
             finalPdfLinks.map(link => limitMap(() => processPdfLink(link, site)))
-        )).filter(Boolean)
+        )).filter(r => r?.status === 'OK')
 
         totalProcessed += processedPageResults.length
 
         // --- Stop-On-Known Pagination Strategy ---
-        if (level0Links.length === 0 || (finalPdfLinks.length > 0 && processedPageResults.length === 0)) {
-            logger.debug({ site: site.id, page }, 'Hit historical boundary (all PDFs on this page are known, or no links found). Stopping pagination.')
+        // Stop if: no links found on page, OR all PDFs were duplicates/skips
+        const anyNew = processedPageResults.length > 0
+        const allKnown = finalPdfLinks.length > 0 && !anyNew
+        if (level0Links.length === 0 || allKnown) {
+            logger.debug({ site: site.id, page }, 'Hit historical boundary. Stopping pagination.')
             break
         }
     }

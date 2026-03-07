@@ -4,8 +4,8 @@
  * Monitors 142 official Indian government recruitment sites.
  *
  * Architecture:
- *   Hash store  → scraper_log.content_hash in Supabase (survives Railway restarts)
- *   PDF storage → Supabase Storage at /raw-pdfs/{site_id}/{YYYY}/{MM}/{sha256}.pdf
+ *   Hash store  → scraper_log.content_hash in Postgres via Prisma
+ *   PDF storage → Cloudflare R2 at /{site_id}/{YYYY}/{MM}/{sha256}.pdf
  *   Dedup       → pdf_hashes table (SHA-256 on raw PDF bytes — kept FOREVER, ~40 bytes each)
  *   PDF cleanup → Main app deletes the actual PDF file after AI parsing (hash stays forever)
  *   Handoff     → POST /api/webhooks/new-pdf (triggers AI parsing pipeline)
@@ -49,7 +49,8 @@ async function main() {
         for (const sites of Object.values(sitesJson.sites)) {
             for (const site of sites) {
                 if (site.scrape_method === 'manual') continue
-                if (!site.notification_page && !(site.has_rss && site.rss_url)) continue
+                // API sites may not have notification_page — they use api_config instead
+                if (!site.notification_page && site.scrape_method !== 'api' && !(site.has_rss && site.rss_url)) continue
                 if (!CONFIG.priorityFilter.includes(site.priority)) continue
                 if (CONFIG.siteIdFilter && site.id !== CONFIG.siteIdFilter) continue
                 allSites.push(site)
@@ -96,6 +97,26 @@ async function main() {
 
         const p0Ids = allSites.filter(s => s.priority === 'P0').map(s => s.id)
         const p0Failed = results.filter(r => p0Ids.includes(r.siteId) && ['ERROR', 'BLOCKED', 'TIMEOUT'].includes(r.status)).length
+
+        // Post health check summary if configured (point to webhook.site, Better Uptime, etc.)
+        if (CONFIG.healthCheckUrl) {
+            try {
+                const { default: axios } = await import('axios')
+                await axios.post(CONFIG.healthCheckUrl, {
+                    status: p0Failed > 0 ? 'DEGRADED' : 'OK',
+                    timestamp: new Date().toISOString(),
+                    ...summary,
+                    p0Failed,
+                    p0Sites: p0Ids,
+                    failedSites: results
+                        .filter(r => ['ERROR', 'BLOCKED', 'TIMEOUT'].includes(r.status))
+                        .map(r => r.siteId),
+                }, { timeout: 5000 })
+                logger.debug({ url: CONFIG.healthCheckUrl }, 'Health check posted')
+            } catch (err) {
+                logger.warn({ err: err.message }, 'Health check POST failed (non-fatal)')
+            }
+        }
 
         if (p0Failed > 0) {
             logger.error({ p0Failed }, `${p0Failed} P0 site(s) failed`)

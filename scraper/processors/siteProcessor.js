@@ -9,7 +9,6 @@ import { processPdfLink } from './pdfProcessor.js'
 import { fetchRssLinks } from './rssExtractor.js'
 import { extractLinks } from './htmlExtractor.js'
 import { fetchApiLinks } from './apiExtractor.js'
-// Note: relevanceFilter.js is no longer used for gating — AI classifier in pdfProcessor handles classification
 
 async function processLevel1Links(links, site, fetcher) {
     const limitMap = pLimit(CONFIG.concurrency)
@@ -51,18 +50,29 @@ export async function processSite(site, fetcher) {
     // ── API-based scraping (for Angular/React SPA sites that load data via XHR) ──
     if (site.scrape_method === 'api') {
         const apiLinks = await fetchApiLinks(site)
+
+        // Change detection — same as RSS path: skip if PDF URL list hasn't changed
+        const apiHash = apiLinks.length > 0
+            ? crypto.createHash('md5').update(apiLinks.map(l => l.url).join('|')).digest('hex')
+            : null
+        const lastApiHash = await getLastContentHash(site.id)
+        if (apiHash && lastApiHash === apiHash) {
+            await writeScraperLog({ site_id: site.id, status: 'NO_CHANGE', content_hash: apiHash, duration_ms: Date.now() - startMs, new_pdfs_found: 0 })
+            logger.debug({ site: site.id }, 'API: no change in PDF URLs — skipping')
+            return { siteId: site.id, status: 'NO_CHANGE' }
+        }
         if (apiLinks.length === 0) {
             await writeScraperLog({ site_id: site.id, status: 'NO_CHANGE', duration_ms: Date.now() - startMs, new_pdfs_found: 0 })
             return { siteId: site.id, status: 'NO_CHANGE' }
         }
 
-        const limitMap = pLimit(CONFIG.concurrency)
+        const limitMap = pLimit(1) // Sequential PDF processing (saves ~80MB RAM)
         const results = await Promise.all(
             apiLinks.map(l => limitMap(() => processPdfLink(l, site)))
         )
         const recruited = results.filter(r => r?.status === 'OK')
 
-        await writeScraperLog({ site_id: site.id, status: 'OK', duration_ms: Date.now() - startMs, new_pdfs_found: recruited.length })
+        await writeScraperLog({ site_id: site.id, status: 'OK', content_hash: apiHash, duration_ms: Date.now() - startMs, new_pdfs_found: recruited.length })
         return { siteId: site.id, status: 'OK', newPdfs: recruited.length }
     }
 
@@ -82,7 +92,7 @@ export async function processSite(site, fetcher) {
         // Deep crawl RSS links — AI classifier in pdfProcessor decides what to parse
         const finalPdfLinks = await processLevel1Links(rssLinks, site, fetcher)
 
-        const limitMap = pLimit(CONFIG.concurrency)
+        const limitMap = pLimit(1) // Sequential PDF processing (saves ~80MB RAM)
         const processed = (await Promise.all(
             finalPdfLinks.map(l => limitMap(() => processPdfLink(l, site)))
         )).filter(r => r?.status === 'OK')
@@ -105,9 +115,18 @@ export async function processSite(site, fetcher) {
             logger.debug({ site: site.id, page }, 'Fetching paginated page')
         }
 
-        const { html, httpStatus, errorStatus, errorMsg } = page === 1
-            ? await fetcher.fetch(site) // Uses configured mode + handles delay seamlessly
-            : await fetcher.fetchStatic(fetchUrl) // Paginated pages are almost always static 
+        let fetchResult
+        if (page === 1) {
+            fetchResult = await fetcher.fetch(site) // Uses configured mode + handles delay
+        } else {
+            try {
+                fetchResult = await fetcher.fetchStatic(fetchUrl)
+            } catch (err) {
+                logger.warn({ site: site.id, page, err: err.message }, 'Paginated page fetch failed — stopping pagination')
+                break // Consistent with fetch() returning html:null on error
+            }
+        }
+        const { html, httpStatus, errorStatus, errorMsg } = fetchResult
 
         if (!html) {
             if (page === 1) {
@@ -142,8 +161,10 @@ export async function processSite(site, fetcher) {
         const finalPdfLinks = await processLevel1Links(level0Links, site, fetcher)
 
         // --- Stage 5: PDF Pipeline ---
+        // Process sequentially to minimize peak RAM (Gemini serializes anyway)
+        const pdfLimitMap = pLimit(1)
         const processedPageResults = (await Promise.all(
-            finalPdfLinks.map(link => limitMap(() => processPdfLink(link, site)))
+            finalPdfLinks.map(link => pdfLimitMap(() => processPdfLink(link, site)))
         )).filter(r => r?.status === 'OK')
 
         totalProcessed += processedPageResults.length

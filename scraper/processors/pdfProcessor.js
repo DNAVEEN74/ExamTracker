@@ -11,6 +11,11 @@ import { classifyNotification, SHOULD_PARSE_TYPES } from './aiClassifier.js'
 // Shared HTTPS agent — created once, reused across all PDF downloads in this run
 const httpsAgent = new https.Agent({ rejectUnauthorized: false })
 
+// In-flight dedup guard — prevents race condition where two concurrent downloads of
+// the exact same PDF both pass isPdfAlreadySeen() before either records the hash.
+// Set entries are cleared once the hash is safely written to the DB.
+const inFlightHashes = new Set()
+
 export async function processPdfLink(link, site) {
     // Download with retry
     let pdfBuffer
@@ -20,7 +25,7 @@ export async function processPdfLink(link, site) {
                 responseType: 'arraybuffer',
                 headers: { 'User-Agent': CONFIG.userAgent },
                 timeout: CONFIG.timeoutMs,
-                maxContentLength: CONFIG.maxPdfSizeBytes,
+                maxContentLength: 40 * 1024 * 1024, // 40MB — classifier handles large PDFs gracefully
                 httpsAgent,
             })
             pdfBuffer = Buffer.from(res.data)
@@ -49,10 +54,16 @@ export async function processPdfLink(link, site) {
     const sha256 = hashBufferSha256(pdfBuffer)
 
     // Deduplication — same PDF content won't be reprocessed (hash lives forever)
+    // Two-layer check: in-flight Set (catches concurrent race) + DB lookup (catches across runs)
+    if (inFlightHashes.has(sha256)) {
+        logger.debug({ site: site.id, hash: sha256.slice(0, 12) }, 'Duplicate PDF (in-flight race) — skip')
+        return { status: 'DUPLICATE', hash: sha256 }
+    }
     if (await isPdfAlreadySeen(sha256)) {
         logger.debug({ site: site.id, hash: sha256.slice(0, 12) }, 'Duplicate PDF — skip')
         return { status: 'DUPLICATE', hash: sha256 }
     }
+    inFlightHashes.add(sha256) // Mark as being processed — cleared after DB write
 
     // ── Tier 1: AI Classification ────────────────────────────────────────────
     // Use the headline from API scraping (rich title) or fall back to link_text (HTML scraping)
@@ -70,6 +81,7 @@ export async function processPdfLink(link, site) {
             { site: site.id, type: classification.type, headline: headline.slice(0, 60), reason: classification.reason },
             `⏭️  Classified as ${classification.type} — skipping full parse`
         )
+        pdfBuffer = null // 🧹 Free memory immediately
         return { status: 'CLASSIFIED_SKIP', type: classification.type, reason: classification.reason }
     }
 
@@ -79,13 +91,16 @@ export async function processPdfLink(link, site) {
     let storagePath
     try {
         storagePath = await uploadPdfToStorage(pdfBuffer, site.id, sha256)
+        pdfBuffer = null // 🧹 Free memory immediately — no longer needed
     } catch (err) {
         logger.error({ url: link.url, err: err.message }, 'Storage upload failed')
+        pdfBuffer = null
         return { status: 'UPLOAD_FAILED', reason: err.message }
     }
 
     // Record hash IMMEDIATELY — prevents any future scrape from re-downloading
     await recordPdfHash({ hash: sha256, source_url: link.url, site_id: site.id, storage_path: storagePath })
+    inFlightHashes.delete(sha256) // Safe to remove — hash is now durably in the DB
 
     // Record in pdf_ingestion_log
     const ingestionLogId = await recordIngestionLog({

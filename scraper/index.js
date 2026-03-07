@@ -23,15 +23,14 @@ import { dirname, join } from 'path'
 
 import { CONFIG } from './config/index.js'
 import { logger } from './utils/logger.js'
-import { preloadHashes, hashCache } from './services/database.js'
+import { preloadHashes, hashCache, prisma } from './services/database.js'
 import { PageFetcher } from './services/pageFetcher.js'
 import { processSite } from './processors/siteProcessor.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 async function main() {
-    // Global Watchdog
-    const controller = new AbortController()
+    // Global Watchdog — kills the process if scraping hangs indefinitely
     const globalTimeout = setTimeout(() => {
         logger.fatal('Global execution timeout. Killing process to prevent indefinite hanging.')
         process.exit(2)
@@ -124,6 +123,8 @@ async function main() {
         }
     } finally {
         clearTimeout(globalTimeout)
+        // Release Prisma DB connection pool cleanly before process exits
+        await prisma.$disconnect().catch(() => { })
     }
 }
 

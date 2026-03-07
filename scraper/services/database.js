@@ -45,6 +45,11 @@ export async function writeScraperLog(entry) {
                 }
             })
         }, { retries: 3, onFailedAttempt: e => logger.warn({ err: e.message }, 'Retrying scraperLog insert') })
+        // Keep hashCache current within the run — prevents re-detecting the same change if
+        // processSite() were ever called twice for the same site in the same invocation
+        if (entry.content_hash) {
+            hashCache.set(entry.site_id, entry.content_hash)
+        }
     } catch (err) {
         logger.error({ error: err.message }, 'Failed to write scraper_log after retries')
     }

@@ -6,28 +6,19 @@ buildCommand = "npm install && npx playwright install chromium --with-deps"
 restartPolicyType = "always"
 
 # ── Railway Cron Service Setup ────────────────────────────────────────────────
-# Create 4 separate Railway cron services all pointing to this repo.
-# Set PRIORITY_FILTER as an env var on each service.
+# Create 2 separate Railway cron services all pointing to this repo.
+# They are staggered by 30 minutes so they NEVER run at the same time.
+# This ensures zero parallel billing on Railway, maximizing the $5 Hobby credit.
 #
-# Service 1 — examtracker-scraper-p0
+# Service 1 — examtracker-fast
 #   Start:    node index.js
-#   Cron:     0 */2 * * *          (every 2 hours)
-#   Env:      PRIORITY_FILTER=P0
+#   Cron:     0 */3 * * *          (every 3 hours: 00:00, 03:00, 06:00...)
+#   Env:      PRIORITY_FILTER=P0,P1
 #
-# Service 2 — examtracker-scraper-p1
+# Service 2 — examtracker-slow
 #   Start:    node index.js
-#   Cron:     0 0,6,12,18 * * *    (every 6 hours)
-#   Env:      PRIORITY_FILTER=P1
-#
-# Service 3 — examtracker-scraper-p2
-#   Start:    node index.js
-#   Cron:     0 1,13 * * *         (every 12 hours)
-#   Env:      PRIORITY_FILTER=P2
-#
-# Service 4 — examtracker-scraper-p3
-#   Start:    node index.js
-#   Cron:     0 6 * * *            (daily at 6 AM IST)
-#   Env:      PRIORITY_FILTER=P3
+#   Cron:     30 1,13 * * *        (1:30 AM and 1:30 PM UTC)
+#   Env:      PRIORITY_FILTER=P2,P3
 #
 # Shared env vars (set via Railway shared variables on all 4 services):
 #   DATABASE_URL,

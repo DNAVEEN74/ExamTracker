@@ -21,8 +21,6 @@
  * Just replace GEMINI_API_KEY and set GEMINI_CLASSIFIER_RPM in .env.
  * No code changes required.
  */
-
-
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import pLimit from 'p-limit'
 import { CONFIG } from '../config/index.js'
@@ -52,7 +50,22 @@ export const SHOULD_PARSE_TYPES = new Set([DOC_TYPE.RECRUITMENT])
 // To upgrade: just set GEMINI_API_KEY + GEMINI_CLASSIFIER_RPM in .env. Zero code change.
 const CLASSIFIER_RPM = parseInt(process.env.GEMINI_CLASSIFIER_RPM || '10', 10)
 const GEMINI_CALL_GAP_MS = Math.ceil(60_000 / CLASSIFIER_RPM) // e.g. 60000/10 = 6000ms
+// Default: gemini-3.1-flash-lite (released Mar 3 2026 — latest Gemini 3 Flash-Lite).
+// gemini-2.0-flash-lite shuts down June 1 2026 — stay on 3.x.
+// Override via GEMINI_CLASSIFIER_MODEL in .env, zero code change needed.
+const CLASSIFIER_MODEL = process.env.GEMINI_CLASSIFIER_MODEL || 'gemini-3.1-flash-lite-preview'
 const geminiLimit = pLimit(1) // Only 1 Gemini call at a time — gap logic enforces RPM
+
+const apiKey = CONFIG.geminiApiKey
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null
+const model = genAI ? genAI.getGenerativeModel({
+    model: CLASSIFIER_MODEL,
+    generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.05,
+        maxOutputTokens: 128,
+    },
+}) : null
 
 let _lastGeminiCallAt = 0
 async function waitForGeminiGap() {
@@ -92,14 +105,13 @@ Return ONLY valid JSON with no explanation:
  *
  * @param {object} params
  * @param {string} params.headline  - The notice title/headline
- * @param {Buffer} params.pdfBuffer - Full PDF buffer (first 60KB is sent)
+ * @param {Buffer} params.pdfBuffer - Full PDF buffer
  * @param {string} params.siteId    - Site ID for logging
  * @param {string} params.siteName  - Site name for logging
  * @returns {Promise<{type: string, confidence: string, reason: string}>}
  */
 export async function classifyNotification({ headline, pdfBuffer, siteId, siteName }) {
-    const apiKey = CONFIG.geminiApiKey
-    if (!apiKey) {
+    if (!apiKey || !model) {
         logger.warn({ siteId }, 'GEMINI_API_KEY not set — skipping classification, defaulting to RECRUITMENT')
         return { type: DOC_TYPE.RECRUITMENT, confidence: 'LOW', reason: 'No API key — classification skipped' }
     }
@@ -108,26 +120,31 @@ export async function classifyNotification({ headline, pdfBuffer, siteId, siteNa
     return geminiLimit(async () => {
         await waitForGeminiGap()
 
-        // First 60KB only — covers the first page of any PDF, much cheaper than full file
-        const firstPageBytes = pdfBuffer.length > 60_000 ? pdfBuffer.slice(0, 60_000) : pdfBuffer
+        // ── Tiered size strategy ─────────────────────────────────────────────
+        // < 20MB → send full PDF (Gemini API inline limit)
+        // 20–40MB → headline-only (too large for inline; headline is enough 95% of the time)
+        // > 40MB → always OTHER (gazette compilations, annual reports — never recruitment)
+        const MB = 1024 * 1024
+        if (pdfBuffer.length > 40 * MB) {
+            logger.info({ siteId, size: `${(pdfBuffer.length / MB).toFixed(1)}MB` },
+                'PDF >40MB — classifying as OTHER (gazette/compilation, not recruitment)')
+            return { type: DOC_TYPE.OTHER, confidence: 'HIGH', reason: 'PDF >40MB — gazette or compilation document, not a recruitment notification' }
+        }
+
+        const useFullPdf = pdfBuffer.length <= 20 * MB
         const prompt = `${CLASSIFY_PROMPT}\n\nHeadline: "${headline}"\nSite: ${siteName} (${siteId})`
 
+        if (!useFullPdf) {
+            logger.debug({ siteId, size: `${(pdfBuffer.length / MB).toFixed(1)}MB` },
+                'PDF 20–40MB: using headline-only classification')
+        }
+
         try {
-            const genAI = new GoogleGenerativeAI(apiKey)
-            const model = genAI.getGenerativeModel({
-                model: 'gemini-2.0-flash',
-                generationConfig: {
-                    responseMimeType: 'application/json',
-                    temperature: 0.05,
-                    maxOutputTokens: 128,
-                },
-            })
+            const parts = useFullPdf
+                ? [{ inlineData: { mimeType: 'application/pdf', data: pdfBuffer.toString('base64') } }, { text: prompt }]
+                : [{ text: prompt }] // Headline-only for large PDFs
 
-            const response = await model.generateContent([
-                { inlineData: { mimeType: 'application/pdf', data: firstPageBytes.toString('base64') } },
-                { text: prompt },
-            ])
-
+            const response = await model.generateContent(parts)
             const raw = response.response.text().trim()
             const cleaned = raw.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim()
             const result = JSON.parse(cleaned)

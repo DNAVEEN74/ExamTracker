@@ -116,7 +116,8 @@ Context: ${ctx.siteName} | Headline: ${ctx.headline} | Today: ${new Date().toISO
 
 async function fullAiParse(pdfBuffer, ctx) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { responseMimeType: 'application/json', temperature: 0.1, maxOutputTokens: 16384 } })
+    const parseModel = process.env.GEMINI_CLASSIFIER_MODEL || 'gemini-3.1-flash-lite-preview'
+    const model = genAI.getGenerativeModel({ model: parseModel, generationConfig: { responseMimeType: 'application/json', temperature: 0.1, maxOutputTokens: 16384 } })
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const res = await model.generateContent([{ inlineData: { mimeType: 'application/pdf', data: pdfBuffer.toString('base64') } }, { text: buildParsePrompt(ctx) }])

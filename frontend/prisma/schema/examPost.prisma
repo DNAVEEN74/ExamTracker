@@ -1,0 +1,78 @@
+model ExamPost {
+  id         String  @id @default(uuid())
+  exam_id    String
+  post_name  String
+  post_code  String?
+  sort_order Int     @default(0)
+
+  // ─── Vacancies ────────────────────────────────────────────────────────────
+  total_vacancies Int?
+
+  // ─── Age ──────────────────────────────────────────────────────────────────
+  min_age         Int?
+  age_cutoff_date DateTime? @db.Date
+
+  // ─── Qualification ────────────────────────────────────────────────────────
+  required_qualification  QualificationLevel
+  required_streams        String[]           @default([])
+  min_marks_percentage    Float?
+  allows_final_year       Boolean            @default(false)
+  required_certifications String[]           @default([])
+
+  // ─── Eligibility Restrictions ─────────────────────────────────────────────
+  nationality_requirement    Nationality    @default(INDIAN)
+  domicile_required          String?
+  gender_restriction         Gender?
+  marital_status_requirement MaritalStatus?
+  physical_requirements      Json?
+
+  // ─── Post-Specific Dates ──────────────────────────────────────────────────
+  exam_date       DateTime? @db.Date
+  admit_card_date DateTime? @db.Date
+  result_date     DateTime? @db.Date
+
+  // ─── Compensation ─────────────────────────────────────────────────────────
+  pay_level               String?
+  pay_scale               String?
+  grade_pay               Int?
+  min_in_hand_salary      Int?
+  probation_period_months Int?
+  service_bond_required   Boolean @default(false)
+  service_bond_years      Int?
+  service_bond_amount     Int?
+
+  // ─── Application Details ──────────────────────────────────────────────────
+  exam_mode                   String?
+  application_mode            String[] @default([])
+  apply_online_url            String?
+  exam_cities                 String[] @default([])
+  exam_cities_note            String?
+  can_choose_exam_center      Boolean  @default(true)
+  posting_location_preference Boolean  @default(true)
+  transfer_policy             String?
+
+  // ─── UX Features ──────────────────────────────────────────────────────────
+  rejection_reasons             String[] @default([])
+  important_form_codes          Json?
+  required_documents            Json?
+  has_special_reservation_rules Boolean  @default(false)
+  reservation_rules             Json?
+  selection_process             Json?
+
+  // ─── Metadata ─────────────────────────────────────────────────────────────
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // ─── Relations ────────────────────────────────────────────────────────────
+  exam          Exam               @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+  age_limits    ExamPostAgeLimit[]
+  vacancies     ExamPostVacancy[]
+  tracked_exams TrackedExam[]
+  admit_cards   AdmitCard[]
+  results       ExamResult[]
+
+  @@index([exam_id])
+  @@index([required_qualification])
+  @@index([exam_id, sort_order])
+  @@map("exam_posts")
+}

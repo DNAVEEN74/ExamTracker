@@ -1,0 +1,16 @@
+model ScraperLog {
+  id             String   @id @default(uuid())
+  site_id        String
+  status         String
+  content_hash   String?
+  http_status    Int?
+  error_message  String?
+  duration_ms    Int
+  new_pdfs_found Int      @default(0)
+  scraped_at     DateTime @default(now())
+
+  pdf_hashes PdfHash[]
+
+  @@index([site_id, scraped_at])
+  @@map("scraper_log")
+}

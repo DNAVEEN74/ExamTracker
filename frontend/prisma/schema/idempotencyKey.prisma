@@ -1,0 +1,8 @@
+model IdempotencyKey {
+  id         String   @id @default(uuid())
+  key        String   @unique
+  created_at DateTime @default(now())
+
+  @@index([created_at])
+  @@map("idempotency_keys")
+}

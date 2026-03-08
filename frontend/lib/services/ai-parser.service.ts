@@ -26,7 +26,7 @@ export interface ParsedPost {
     max_age_pwd_sc_st: number | null
     max_age_ex_serviceman: number | null
     age_cutoff_date: string | null
-    required_qualification: 'CLASS_10' | 'CLASS_12' | 'ITI' | 'DIPLOMA' | 'GRADUATE_ANY' | 'GRADUATE_SPECIFIC' | 'POST_GRADUATE' | 'DOCTORATE' | 'PROFESSIONAL' | 'ANY'
+    required_qualification: 'CLASS_10' | 'CLASS_12' | 'ITI' | 'DIPLOMA' | 'GRADUATION' | 'POST_GRADUATION' | 'DOCTORATE' | 'PROFESSIONAL_CA' | 'PROFESSIONAL_CS' | 'PROFESSIONAL_ICWA' | 'PROFESSIONAL_LLB' | 'PROFESSIONAL_MBBS' | 'PROFESSIONAL_BED'
     required_streams: string[] | null
     min_marks_percentage: number | null
     allows_final_year: boolean
@@ -122,7 +122,7 @@ CRITICAL INSTRUCTIONS:
   - Age relaxations (auto-derive if notification only states General max age): OBC = Gen+3, SC/ST = Gen+5, EWS = same as General, PwD/General = Gen+10, PwD/OBC = Gen+13, PwD/SC/ST = Gen+15.
   - age_cutoff_date: use the application_end date if not explicitly stated.
   - Fees: Extract ALL category-specific fees. Use integers only in INR (strip ₹ and /-). If a category is explicitly free, use 0. If a category fee is not mentioned at all, return null.
-  - Required Qualification exact enums only: CLASS_10 | CLASS_12 | ITI | DIPLOMA | GRADUATE_ANY | GRADUATE_SPECIFIC | POST_GRADUATE | DOCTORATE | PROFESSIONAL | ANY
+  - Required Qualification exact enums only: CLASS_10 | CLASS_12 | ITI | DIPLOMA | GRADUATION | POST_GRADUATION | DOCTORATE | PROFESSIONAL_CA | PROFESSIONAL_CS | PROFESSIONAL_ICWA | PROFESSIONAL_LLB | PROFESSIONAL_MBBS | PROFESSIONAL_BED
   - Domicile: if restricted to a specific state, provide the 2-letter state code (e.g. MH for Maharashtra), otherwise null.
 
 CONTEXT HINTS:
@@ -169,7 +169,7 @@ CONTEXT HINTS:
       "max_age_pwd_sc_st": "number|null",
       "max_age_ex_serviceman": "number|null",
       "age_cutoff_date": "YYYY-MM-DD|null",
-      "required_qualification": "enum",
+      "required_qualification": "enum (CLASS_10|CLASS_12|ITI|DIPLOMA|GRADUATION|POST_GRADUATION|DOCTORATE|PROFESSIONAL_CA|PROFESSIONAL_CS|PROFESSIONAL_ICWA|PROFESSIONAL_LLB|PROFESSIONAL_MBBS|PROFESSIONAL_BED)",
       "required_streams": "string[]|null",
       "min_marks_percentage": "number|null",
       "allows_final_year": "boolean",
@@ -220,7 +220,7 @@ CONTEXT HINTS:
 
 const VALID_CATEGORIES = new Set(['SSC', 'RAILWAY', 'BANKING', 'UPSC_CIVIL', 'STATE_PSC', 'DEFENCE', 'POLICE', 'TEACHING', 'PSU', 'OTHER'])
 const VALID_LEVELS = new Set(['CENTRAL', 'STATE', 'PSU', 'DEFENCE', 'BANKING'])
-const VALID_QUALS = new Set(['CLASS_10', 'CLASS_12', 'ITI', 'DIPLOMA', 'GRADUATE_ANY', 'GRADUATE_SPECIFIC', 'POST_GRADUATE', 'DOCTORATE', 'PROFESSIONAL', 'ANY'])
+const VALID_QUALS = new Set(['CLASS_10', 'CLASS_12', 'ITI', 'DIPLOMA', 'GRADUATION', 'POST_GRADUATION', 'DOCTORATE', 'PROFESSIONAL_CA', 'PROFESSIONAL_CS', 'PROFESSIONAL_ICWA', 'PROFESSIONAL_LLB', 'PROFESSIONAL_MBBS', 'PROFESSIONAL_BED'])
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
 
 function coerceDate(val: unknown): string | null {
@@ -277,7 +277,7 @@ function sanitisePost(rawPost: Record<string, unknown>, fallbackAppEnd: string):
         age_cutoff_date: coerceDate(rawPost.age_cutoff_date) ?? fallbackAppEnd,
 
         required_qualification: VALID_QUALS.has(rawPost.required_qualification as string)
-            ? rawPost.required_qualification as ParsedPost['required_qualification'] : 'GRADUATE_ANY',
+            ? rawPost.required_qualification as ParsedPost['required_qualification'] : 'GRADUATION',
         required_streams: Array.isArray(rawPost.required_streams) ? rawPost.required_streams.map(String) : null,
         min_marks_percentage: typeof rawPost.min_marks_percentage === 'number' ? rawPost.min_marks_percentage : null,
         allows_final_year: rawPost.allows_final_year === true,

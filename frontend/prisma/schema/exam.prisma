@@ -1,0 +1,62 @@
+model Exam {
+  id                  String       @id @default(uuid())
+  slug                String       @unique
+  name                String
+  short_name          String?
+  notification_number String?
+  category            ExamCategory
+  conducting_body     String
+  level               ExamLevel
+  state_code          String?
+
+  // ─── Dates (notification-level, shared across all posts) ──────────────────
+  notification_date       DateTime? @db.Date
+  application_start       DateTime? @db.Date
+  application_end         DateTime  @db.Date
+  last_date_fee_payment   DateTime? @db.Date
+  correction_window_start DateTime? @db.Date
+  correction_window_end   DateTime? @db.Date
+
+  // ─── Source & Verification ────────────────────────────────────────────────
+  official_notification_url String
+  syllabus_url              String?
+  notification_verified     Boolean    @default(false)
+  data_source               DataSource @default(MANUAL)
+  is_active                 Boolean    @default(false)
+  is_cancelled              Boolean    @default(false)
+  cancellation_reason       String?
+
+  // ─── Content ──────────────────────────────────────────────────────────────
+  fee_payment_mode        String[]  @default([])
+  description             String?
+  syllabus_summary        String?
+  selection_process       String[]  @default([])
+  previous_year_cutoff    String?
+  answer_key_url          String?
+  answer_key_release_date DateTime? @db.Date
+
+  // ─── Metadata ─────────────────────────────────────────────────────────────
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  created_by       String?
+  last_verified_at DateTime?
+
+  // ─── Relations ────────────────────────────────────────────────────────────
+  posts       ExamPost[]
+  fees        ExamFee[]
+  stages      ExamStage[]
+  revisions   ExamRevision[]
+  tracked_by  TrackedExam[]
+  admit_cards AdmitCard[]
+  results     ExamResult[]
+  creator     User?          @relation(fields: [created_by], references: [id], onDelete: SetNull)
+
+  @@index([category, is_active])
+  @@index([is_active, application_end])
+  @@index([conducting_body])
+  @@index([level, state_code])
+  @@index([notification_verified, is_active])
+  @@index([data_source])
+  @@index([created_at])
+  @@map("exams")
+}

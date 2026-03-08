@@ -1,0 +1,13 @@
+model ExamPostVacancy {
+  id       String @id @default(uuid())
+  post_id  String
+  category String
+  count    Int
+
+  post ExamPost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, category])
+  @@index([post_id])
+  @@index([category])
+  @@map("exam_post_vacancies")
+}

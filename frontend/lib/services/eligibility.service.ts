@@ -69,7 +69,15 @@ export async function getEligibleExams(
                 where,
                 skip: offset,
                 take: limit,
-                orderBy: { application_end: 'asc' }
+                orderBy: { application_end: 'asc' },
+                include: {
+                    posts: {
+                        include: {
+                            age_limits: true,
+                            vacancies: true
+                        }
+                    }
+                }
             }),
             db.exam.count({ where })
         ])
@@ -92,26 +100,60 @@ function isEligibleClientSide(
     const dob = profile.date_of_birth as Date | undefined
     if (!dob) return true
 
-    const ageCutoff = (exam.age_cutoff_date as Date | undefined) || (exam.application_end as Date)
-    const age = (new Date(ageCutoff).getTime() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
-    const maxAge = (exam.max_age_general as number) ?? 99
-    const minAge = (exam.min_age as number) ?? 0
-    if (age < minAge || age > maxAge) return false
+    const posts = (exam.posts as any[]) || []
+    if (posts.length === 0) return true
 
+    const userCat = (profile.category as string) || 'GENERAL'
     const userQual = QUALIFICATION_ORDER[profile.highest_qualification as string] ?? 5
-    const reqQual = QUALIFICATION_ORDER[exam.required_qualification as string] ?? 5
-    if (userQual < reqQual) return false
 
-    if (exam.gender_restriction && exam.gender_restriction !== profile.gender) return false
+    for (const post of posts) {
+        let isPostEligible = true
 
-    if (mode === 'VACANCY_AWARE' && exam.vacancies_by_category) {
-        const vac = exam.vacancies_by_category as Record<string, number>
-        const cat = (profile.category as Category) ?? 'GENERAL'
-        const categoryKey = { OBC_NCL: 'obc', SC: 'sc', ST: 'st', EWS: 'ews', OBC_CL: 'general', GENERAL: 'general' }[cat] ?? 'general'
-        if ((vac[categoryKey] ?? 0) <= 0) return false
+        const ageCutoff = (post.age_cutoff_date as Date | undefined) || (exam.application_end as Date)
+        const age = (new Date(ageCutoff).getTime() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
+
+        const minAge = (post.min_age as number) ?? 0
+
+        let maxAge = 99
+        if (post.age_limits && Array.isArray(post.age_limits) && post.age_limits.length > 0) {
+            let targetCat = 'GENERAL'
+            if (userCat === 'OBC_NCL' || userCat === 'OBC_CL') targetCat = 'OBC'
+            else if (userCat === 'SC' || userCat === 'ST') targetCat = 'SC_ST'
+            else if (userCat === 'EWS') targetCat = 'EWS'
+
+            const limitRecord = post.age_limits.find((l: any) => l.category === targetCat)
+            if (limitRecord && limitRecord.max_age) {
+                maxAge = limitRecord.max_age
+            } else {
+                const genLimit = post.age_limits.find((l: any) => l.category === 'GENERAL')
+                if (genLimit && genLimit.max_age) maxAge = genLimit.max_age
+            }
+        }
+
+        if (age < minAge || age > maxAge) isPostEligible = false
+
+        const reqQual = QUALIFICATION_ORDER[post.required_qualification as string] ?? 5
+        if (userQual < reqQual) isPostEligible = false
+
+        if (post.gender_restriction && post.gender_restriction !== profile.gender) isPostEligible = false
+
+        if (mode === 'VACANCY_AWARE' && post.vacancies && Array.isArray(post.vacancies)) {
+            let targetCat = 'GENERAL'
+            if (userCat === 'OBC_NCL' || userCat === 'OBC_CL') targetCat = 'OBC'
+            else if (userCat === 'SC') targetCat = 'SC'
+            else if (userCat === 'ST') targetCat = 'ST'
+            else if (userCat === 'EWS') targetCat = 'EWS'
+
+            const vacRecord = post.vacancies.find((v: any) => v.category === targetCat)
+            if (!vacRecord || vacRecord.count <= 0) {
+                isPostEligible = false
+            }
+        }
+
+        if (isPostEligible) return true
     }
 
-    return true
+    return false
 }
 
 /** Quick summary counts for dashboard + profile page */

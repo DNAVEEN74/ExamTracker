@@ -43,7 +43,19 @@ export async function getExams(opts: {
 /** Single exam detail */
 export async function getExamById(id: string): Promise<Exam | null> {
     try {
-        const exam = await db.exam.findUnique({ where: { id } })
+        const exam = await db.exam.findUnique({
+            where: { id },
+            include: {
+                posts: {
+                    include: {
+                        age_limits: true,
+                        vacancies: true
+                    }
+                },
+                fees: true,
+                stages: true
+            }
+        })
         return exam as unknown as Exam | null
     } catch (error: any) {
         throw new Error(`Failed to fetch exam: ${error.message}`)

@@ -1,0 +1,38 @@
+model UserProfile {
+  id                        String              @id @default(uuid())
+  user_id                   String              @unique
+  date_of_birth             DateTime?           @db.Date
+  category                  Category?
+  highest_qualification     QualificationLevel?
+  qualification_stream      String?
+  marks_percentage          Float?
+  is_final_year             Boolean             @default(false)
+  expected_completion       DateTime?           @db.Date
+  additional_qualifications String[]            @default([])
+  nationality               Nationality?
+  domicile_state            String?
+  current_state             String?
+  exam_states               String[]            @default([])
+  languages_known           String[]            @default([])
+  gender                    Gender?
+  height_cm                 Float?
+  has_vision_correction     Boolean?
+  is_pwd                    Boolean             @default(false)
+  pwd_type                  String?
+  pwd_percentage            Float?
+  is_ex_serviceman          Boolean             @default(false)
+  ex_service_type           String?
+  ex_service_years          Float?
+  marital_status            MaritalStatus?
+  is_government_employee    Boolean             @default(false)
+  has_sports_achievement    Boolean             @default(false)
+  sports_level              String?
+  exam_categories           ExamCategory[]      @default([])
+  profile_completeness      Int                 @default(0)
+  created_at                DateTime            @default(now())
+  updated_at                DateTime            @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}

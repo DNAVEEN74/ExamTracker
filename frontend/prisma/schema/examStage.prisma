@@ -1,0 +1,21 @@
+model ExamStage {
+  id               String        @id @default(uuid())
+  exam_id          String
+  stage_type       ExamStageType
+  stage_name       String
+  stage_date       DateTime?     @db.Date
+  stage_end_date   DateTime?     @db.Date
+  shift            String?
+  duration_minutes Int?
+  sort_order       Int           @default(0)
+  created_at       DateTime      @default(now())
+  updated_at       DateTime      @updatedAt
+
+  exam              Exam               @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+  trackedExamStages TrackedExamStage[]
+
+  @@index([exam_id, sort_order])
+  @@index([stage_date])
+  @@index([exam_id, stage_type])
+  @@map("exam_stages")
+}

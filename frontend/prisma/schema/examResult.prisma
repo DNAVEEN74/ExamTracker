@@ -1,0 +1,28 @@
+model ExamResult {
+  id             String        @id @default(uuid())
+  user_id        String
+  exam_id        String
+  exam_post_id   String?
+  stage_type     ExamStageType
+  marks_obtained Float?
+  max_marks      Float?
+  percentage     Float?
+  rank_obtained  Int?
+  qualified      Boolean?
+  result_url     String?
+  scorecard_url  String?
+  declared_at    DateTime?
+  notes          String?
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  exam      Exam      @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+  exam_post ExamPost? @relation(fields: [exam_post_id], references: [id], onDelete: SetNull)
+
+  @@unique([user_id, exam_id, stage_type])
+  @@index([user_id])
+  @@index([exam_id])
+  @@index([user_id, exam_id])
+  @@map("exam_results")
+}

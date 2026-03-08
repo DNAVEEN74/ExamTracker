@@ -1,0 +1,16 @@
+model PdfHash {
+  id             String   @id @default(uuid())
+  hash           String   @unique
+  source_url     String
+  site_id        String
+  storage_path   String?
+  scraper_log_id String?
+  created_at     DateTime @default(now())
+
+  scraper_log    ScraperLog?       @relation(fields: [scraper_log_id], references: [id], onDelete: SetNull)
+  ingestion_logs PdfIngestionLog[]
+
+  @@index([site_id])
+  @@index([created_at])
+  @@map("pdf_hashes")
+}

@@ -1,0 +1,20 @@
+model ExamRevision {
+  id                String     @id @default(uuid())
+  exam_id           String
+  field_name        String
+  old_value         String?
+  new_value         String?
+  change_type       ChangeType
+  reason            String?
+  source_url        String?
+  changed_by        String?
+  notification_sent Boolean    @default(false)
+  created_at        DateTime   @default(now())
+
+  exam Exam @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+
+  @@index([exam_id, created_at])
+  @@index([change_type])
+  @@index([changed_by])
+  @@map("exam_revisions")
+}

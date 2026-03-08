@@ -1,0 +1,31 @@
+model User {
+  id                   String          @id
+  email                String          @unique
+  display_name         String
+  email_verified       Boolean         @default(false)
+  auth_provider        String          @default("email")
+  google_id            String?         @unique
+  role                 Role            @default(USER)
+  onboarding_mode      OnboardingMode?
+  onboarding_completed Boolean         @default(false)
+  onboarding_step      Int             @default(0)
+  created_at           DateTime        @default(now())
+  updated_at           DateTime        @updatedAt
+  last_active_at       DateTime        @default(now())
+  is_deleted           Boolean         @default(false)
+  deleted_at           DateTime?
+
+  profile           UserProfile?
+  preferences       NotificationPreferences?
+  tracked_exams     TrackedExam[]
+  otps              Otp[]
+  admit_cards       AdmitCard[]
+  exam_results      ExamResult[]
+  notification_logs NotificationLog[]
+  created_exams     Exam[]
+
+  @@index([role])
+  @@index([is_deleted])
+  @@index([last_active_at])
+  @@map("users")
+}

@@ -1,0 +1,12 @@
+model ExamPostAgeLimit {
+  id       String           @id @default(uuid())
+  post_id  String
+  category AgeLimitCategory
+  max_age  Int
+
+  post ExamPost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, category])
+  @@index([post_id])
+  @@map("exam_post_age_limits")
+}

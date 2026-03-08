@@ -1,0 +1,23 @@
+model TrackedExam {
+  id                 String        @id @default(uuid())
+  user_id            String
+  exam_id            String
+  exam_post_id       String?
+  status             TrackedStatus @default(TRACKING)
+  application_number String?
+  roll_number        String?
+  tracked_at         DateTime      @default(now())
+  applied_at         DateTime?
+  updated_at         DateTime      @updatedAt
+
+  user      User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  exam      Exam               @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+  exam_post ExamPost?          @relation(fields: [exam_post_id], references: [id], onDelete: SetNull)
+  stages    TrackedExamStage[]
+
+  @@unique([user_id, exam_id])
+  @@index([user_id])
+  @@index([exam_id])
+  @@index([status])
+  @@map("tracked_exams")
+}

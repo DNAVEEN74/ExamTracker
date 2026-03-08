@@ -1,0 +1,9 @@
+model RateLimit {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  points    Int      @default(0)
+  expire_at DateTime
+
+  @@index([expire_at])
+  @@map("rate_limits")
+}

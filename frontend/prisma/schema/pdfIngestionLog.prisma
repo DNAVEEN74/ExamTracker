@@ -1,0 +1,24 @@
+model PdfIngestionLog {
+  id              String          @id @default(uuid())
+  pdf_hash_value  String
+  site_id         String?
+  source_url      String?
+  storage_path    String?
+  link_text       String?
+  context_text    String?
+  status          String          @default("QUEUED")
+  ai_status       IngestionStatus @default(PENDING)
+  ai_error        String?
+  exam_id         String?
+  processing_time Int?
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+
+  pdf_hash PdfHash @relation(fields: [pdf_hash_value], references: [hash])
+
+  @@index([pdf_hash_value])
+  @@index([ai_status])
+  @@index([site_id, created_at])
+  @@index([exam_id])
+  @@map("pdf_ingestion_log")
+}

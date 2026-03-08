@@ -1,0 +1,200 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["prismaSchemaFolder"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum OnboardingMode {
+  FOCUSED
+  DISCOVERY
+  VACANCY_AWARE
+  COMPREHENSIVE
+}
+
+enum Category {
+  GENERAL
+  OBC_NCL
+  OBC_CL
+  SC
+  ST
+  EWS
+}
+
+enum QualificationLevel {
+  CLASS_10
+  CLASS_12
+  ITI
+  DIPLOMA
+  GRADUATION
+  POST_GRADUATION
+  DOCTORATE
+  PROFESSIONAL_CA
+  PROFESSIONAL_CS
+  PROFESSIONAL_ICWA
+  PROFESSIONAL_LLB
+  PROFESSIONAL_MBBS
+  PROFESSIONAL_BED
+}
+
+enum Nationality {
+  INDIAN
+  NEPAL_BHUTAN
+  PIO
+  OCI
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  THIRD_GENDER
+  PREFER_NOT_TO_SAY
+}
+
+enum MaritalStatus {
+  UNMARRIED
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum ExamCategory {
+  SSC
+  RAILWAY
+  BANKING
+  UPSC_CIVIL
+  STATE_PSC
+  DEFENCE
+  POLICE
+  TEACHING
+  PSU
+  OTHER
+}
+
+enum ExamLevel {
+  CENTRAL
+  STATE
+  PSU
+  DEFENCE
+  BANKING
+}
+
+enum TrackedStatus {
+  TRACKING
+  APPLIED
+  APPEARED
+  RESULT_AWAITED
+  SELECTED
+  NOT_SELECTED
+  WITHDRAWN
+}
+
+enum DataSource {
+  MANUAL
+  SCRAPER
+  RSS
+  API
+}
+
+// ─── Role-Based Access Control ──────────────────────────────────────────────
+
+enum Role {
+  USER
+  EDITOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+// ─── Normalized Lookup Enums ────────────────────────────────────────────────
+
+enum AgeLimitCategory {
+  GENERAL
+  OBC
+  SC_ST
+  EWS
+  PWD_GENERAL
+  PWD_OBC
+  PWD_SC_ST
+  EX_SERVICEMAN
+}
+
+enum FeeCategory {
+  GENERAL
+  OBC
+  SC_ST
+  EWS
+  PWD
+  WOMEN
+  EX_SERVICEMAN
+}
+
+// ─── Pipeline & Ingestion ───────────────────────────────────────────────────
+
+enum IngestionStatus {
+  QUEUED
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  SKIPPED
+}
+
+// ─── Notification System ────────────────────────────────────────────────────
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  WHATSAPP
+  SMS
+  IN_APP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  BOUNCED
+}
+
+// ─── Exam Stages & Lifecycle ────────────────────────────────────────────────
+
+enum ExamStageType {
+  TIER_1
+  TIER_2
+  TIER_3
+  PRELIM
+  MAINS
+  INTERVIEW
+  SKILL_TEST
+  PHYSICAL_TEST
+  DOCUMENT_VERIFICATION
+  MEDICAL
+  OTHER
+}
+
+// ─── Audit Trail ────────────────────────────────────────────────────────────
+
+enum ChangeType {
+  CREATED
+  UPDATED
+  DATE_CHANGED
+  CANCELLED
+  REINSTATED
+  VACANCY_UPDATED
+  CORRECTION
+}
+
+// ─── Admit Card Lifecycle ───────────────────────────────────────────────────
+
+enum AdmitCardStatus {
+  NOT_RELEASED
+  RELEASED
+  DOWNLOADED
+  VERIFIED
+}

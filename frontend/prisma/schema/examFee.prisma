@@ -1,0 +1,12 @@
+model ExamFee {
+  id           String      @id @default(uuid())
+  exam_id      String
+  fee_category FeeCategory
+  amount       Float
+
+  exam Exam @relation(fields: [exam_id], references: [id], onDelete: Cascade)
+
+  @@unique([exam_id, fee_category])
+  @@index([exam_id])
+  @@map("exam_fees")
+}

@@ -1,0 +1,23 @@
+model NotificationPreferences {
+  id                         String   @id @default(uuid())
+  user_id                    String   @unique
+  email_enabled              Boolean  @default(true)
+  email_frequency            String   @default("IMMEDIATE") // IMMEDIATE, DAILY, WEEKLY
+  push_enabled               Boolean  @default(false)
+  alert_new_eligible_exam    Boolean  @default(true)
+  alert_deadline_approaching Boolean  @default(true)
+  alert_deadline_days_before Int      @default(3)
+  alert_admit_card_released  Boolean  @default(true)
+  alert_result_declared      Boolean  @default(true)
+  alert_answer_key_released  Boolean  @default(false)
+  quiet_hours_enabled        Boolean  @default(false)
+  quiet_hours_start          String   @default("22:00")
+  quiet_hours_end            String   @default("08:00")
+  notification_language      String   @default("en")
+  created_at                 DateTime @default(now())
+  updated_at                 DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}

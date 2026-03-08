@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import db from '@/lib/db'
-import { checkAndMarkIdempotent } from '@/lib/redis'
+import { checkIdempotent } from '@/lib/redis'
 import {
     downloadPdfFromStorage,
     deletePdfFromStorage,
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     console.log(`[new-pdf] â–¶ ${site_id} | ${pdf_hash.slice(0, 12)}`)
 
     // â”€â”€ 2. Idempotency â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const alreadyProcessed = await checkAndMarkIdempotent(`pdf:${pdf_hash}`)
+    const alreadyProcessed = await checkIdempotent(`pdf:${pdf_hash}`)
     if (alreadyProcessed) {
         return NextResponse.json({ success: true, skipped: true, reason: 'already_processed' })
     }
@@ -152,6 +152,14 @@ export async function POST(request: NextRequest) {
     try {
         // 5. Wrap insertion safely in a Prisma Transaction
         const transactionResult = await db.$transaction(async (tx) => {
+            // Lock Idempotency Key INSIDE transaction to prevent lockout bug
+            try {
+                await tx.idempotencyKey.create({ data: { key: `pdf:${pdf_hash}` } })
+            } catch (e: any) {
+                if (e.code === 'P2002') return { success: true, skipped: true, reason: 'already_processed' }
+                throw e
+            }
+
             // Check for duplicate manually before failing the transaction constraint explicitly
             const existingNotif = await tx.exam.findUnique({
                 where: { slug }
@@ -161,8 +169,18 @@ export async function POST(request: NextRequest) {
                 return { success: true, skipped: true, reason: 'duplicate_notification' }
             }
 
-            const isMultiple = parsed.posts.length > 1
-            const totalCount = parsed.posts.length
+            // Deduplicate AI Posts (AI can sometimes hallucinate identical posts twice in the array)
+            const uniquePostsMap = new Map<string, any>()
+            for (const p of parsed.posts) {
+                const key = `${p.post_name?.toLowerCase().trim() || 'general'}-${p.post_code?.toLowerCase().trim() || 'none'}`
+                if (!uniquePostsMap.has(key)) {
+                    uniquePostsMap.set(key, p)
+                }
+            }
+            const deduplicatedPosts = Array.from(uniquePostsMap.values())
+
+            const isMultiple = deduplicatedPosts.length > 1
+            const totalCount = deduplicatedPosts.length
 
             // Insert Parent
             const notif = await tx.exam.create({
@@ -174,27 +192,101 @@ export async function POST(request: NextRequest) {
                     conducting_body: parsed.conducting_body ?? 'Unknown',
                     level: parsed.level ?? 'STATE',
                     state_code: parsed.state_code,
-                    total_vacancies: isMultiple ? null : parsed.posts[0]?.total_vacancies,
                     notification_date: parsed.notification_date ? new Date(parsed.notification_date) : null,
                     application_start: parsed.application_start ? new Date(parsed.application_start) : null,
                     application_end: new Date(parsed.application_end),
-                    exam_date: isMultiple ? null : (parsed.posts[0]?.exam_date ? new Date(parsed.posts[0].exam_date) : null),
-                    admit_card_date: isMultiple ? null : (parsed.posts[0]?.admit_card_date ? new Date(parsed.posts[0].admit_card_date) : null),
-                    result_date: isMultiple ? null : (parsed.posts[0]?.result_date ? new Date(parsed.posts[0].result_date) : null),
-                    min_age: isMultiple ? null : parsed.posts[0]?.min_age,
-                    max_age_general: isMultiple ? null : parsed.posts[0]?.max_age_general,
-                    max_age_obc: isMultiple ? null : parsed.posts[0]?.max_age_obc,
-                    max_age_sc_st: isMultiple ? null : parsed.posts[0]?.max_age_sc_st,
-                    max_age_ews: isMultiple ? null : parsed.posts[0]?.max_age_ews,
-                    required_qualification: (isMultiple
-                        ? 'GRADUATION'
-                        : (['CLASS_10', 'CLASS_12', 'ITI', 'DIPLOMA', 'GRADUATION', 'POST_GRADUATION', 'DOCTORATE'].includes(parsed.posts[0]?.required_qualification as string)
-                            ? parsed.posts[0]?.required_qualification
-                            : 'GRADUATION')) as any,
+                    last_date_fee_payment: parsed.last_date_fee_payment ? new Date(parsed.last_date_fee_payment) : null,
+                    correction_window_start: parsed.correction_window_start ? new Date(parsed.correction_window_start) : null,
+                    correction_window_end: parsed.correction_window_end ? new Date(parsed.correction_window_end) : null,
+                    notification_number: parsed.notification_number,
                     official_notification_url: parsed.official_notification_url ?? source_url,
+                    syllabus_url: parsed.syllabus_url,
+                    fee_payment_mode: parsed.posts?.[0]?.fee_payment_mode ?? [],
                     notification_verified: false,
                     data_source: 'SCRAPER',
                     is_active: false,
+                    posts: {
+                        create: deduplicatedPosts.map((p: any, index: number) => {
+                            const ageLimits: any[] = [];
+                            if (p.max_age_general) ageLimits.push({ category: 'GENERAL', max_age: p.max_age_general });
+                            if (p.max_age_obc) ageLimits.push({ category: 'OBC', max_age: p.max_age_obc });
+                            if (p.max_age_sc_st) ageLimits.push({ category: 'SC_ST', max_age: p.max_age_sc_st });
+                            if (p.max_age_ews) ageLimits.push({ category: 'EWS', max_age: p.max_age_ews });
+
+                            const vacancies: any[] = [];
+                            if (p.vacancies_by_category) {
+                                if (p.vacancies_by_category.general) vacancies.push({ category: 'GENERAL', count: p.vacancies_by_category.general });
+                                if (p.vacancies_by_category.obc) vacancies.push({ category: 'OBC', count: p.vacancies_by_category.obc });
+                                if (p.vacancies_by_category.sc) vacancies.push({ category: 'SC', count: p.vacancies_by_category.sc });
+                                if (p.vacancies_by_category.st) vacancies.push({ category: 'ST', count: p.vacancies_by_category.st });
+                                if (p.vacancies_by_category.ews) vacancies.push({ category: 'EWS', count: p.vacancies_by_category.ews });
+                            }
+
+                            return {
+                                post_name: p.post_name,
+                                post_code: p.post_code,
+                                total_vacancies: p.total_vacancies,
+                                min_age: p.min_age,
+                                age_cutoff_date: p.age_cutoff_date ? new Date(p.age_cutoff_date) : null,
+
+                                required_qualification: p.required_qualification,
+                                required_streams: p.required_streams ?? [],
+                                min_marks_percentage: p.min_marks_percentage,
+                                allows_final_year: p.allows_final_year,
+                                required_certifications: p.required_certifications ?? [],
+
+                                nationality_requirement: p.nationality_requirement,
+                                domicile_required: p.domicile_required,
+                                gender_restriction: p.gender_restriction,
+                                marital_status_requirement: p.marital_status_requirement,
+                                physical_requirements: p.physical_requirements ? JSON.parse(JSON.stringify(p.physical_requirements)) : undefined,
+
+                                exam_date: p.exam_date ? new Date(p.exam_date) : null,
+                                admit_card_date: p.admit_card_date ? new Date(p.admit_card_date) : null,
+                                result_date: p.result_date ? new Date(p.result_date) : null,
+
+                                pay_level: p.pay_matrix_level?.toString(),
+                                pay_scale: p.pay_scale?.toString(),
+                                grade_pay: p.grade_pay,
+                                probation_period_months: p.probation_period_months,
+                                service_bond_required: p.service_bond_required,
+                                service_bond_years: p.service_bond_years,
+                                service_bond_amount: p.service_bond_amount,
+
+                                exam_mode: p.exam_mode,
+                                application_mode: p.application_mode ?? [],
+                                apply_online_url: p.apply_online_url,
+                                exam_cities: p.exam_cities ?? [],
+                                exam_cities_note: p.exam_cities_note,
+                                can_choose_exam_center: p.can_choose_exam_center,
+                                posting_location_preference: p.posting_location_preference,
+                                transfer_policy: p.transfer_policy,
+
+                                required_documents: p.required_documents ? JSON.parse(JSON.stringify(p.required_documents)) : undefined,
+                                has_special_reservation_rules: p.has_special_reservation_rules,
+                                reservation_rules: p.reservation_rules ? JSON.parse(JSON.stringify(p.reservation_rules)) : undefined,
+                                selection_process: p.selection_process ? JSON.parse(JSON.stringify(p.selection_process)) : undefined,
+
+                                age_limits: ageLimits.length > 0 ? { create: ageLimits } : undefined,
+                                vacancies: vacancies.length > 0 ? { create: vacancies } : undefined
+                            };
+                        })
+                    },
+                    fees: {
+                        create: (() => {
+                            const feeRecords: any[] = [];
+                            if (deduplicatedPosts?.[0]) {
+                                const p = deduplicatedPosts[0];
+                                if (p.application_fee_general !== undefined && p.application_fee_general !== null) {
+                                    feeRecords.push({ fee_category: 'GENERAL', amount: p.application_fee_general });
+                                }
+                                if (p.application_fee_sc_st !== undefined && p.application_fee_sc_st !== null) {
+                                    feeRecords.push({ fee_category: 'SC_ST', amount: p.application_fee_sc_st });
+                                }
+                            }
+                            return feeRecords;
+                        })()
+                    }
                 },
                 select: { id: true }
             })

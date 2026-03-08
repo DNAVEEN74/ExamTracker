@@ -17,7 +17,7 @@
     "dependencies": {
         "@aws-sdk/client-s3": "^3.1000.0",
         "@google/generative-ai": "^0.21.0",
-        "@prisma/client": "^6.19.2",
+        "@prisma/client": "6.19.2",
         "axios": "^1.6.0",
         "cheerio": "^1.0.0",
         "cross-env": "^10.1.0",
@@ -35,6 +35,6 @@
         "schema": "../frontend/prisma/schema"
     },
     "devDependencies": {
-        "prisma": "^6.19.2"
+        "prisma": "6.19.2"
     }
 }
